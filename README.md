@@ -76,6 +76,7 @@ Field names map straight to variable names.
 | `ENVIRONMENT` | `local` | `local`, `staging`, `preview` or `production`. |
 | `LOG_LEVEL` | `INFO` | |
 | `LOG_FORMAT` | `json` | `text` for local development. |
+| `LOG_REDACT_KEYS` | empty | More field and query parameter names to mask, comma separated. |
 | `SENTRY_DSN` | unset | Sentry is off when unset. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | |
 | `SENTRY_RELEASE` | `<service>@<version>` | The deploy sets it to the revision. |
@@ -207,14 +208,29 @@ The JSON line holds `ts`, `level`, `logger` and `message`,
 then `service`, `version`, `commit`, `env` and `instance_id`,
 then the request context, then the record's `extra`.
 A 422's validation errors land on the wide event as `validation_errors`.
-Token-like query parameters, such as `access_token` and `code`, are logged as `[redacted]`,
-in both `query` and `referer`.
+The wide event logs at `error` for an unhandled exception or any 5xx, and at `info` otherwise.
+
+### Secrets
+
+Any field whose name looks like a credential is logged as `[redacted]`, however deeply it is nested.
+That covers names containing `token`, `secret`, `password`, `api_key`, `authorization`, `cookie`,
+`signature`, `credential` or `private_key`, and any name listed in `LOG_REDACT_KEYS`.
+The wide event's `query` and `referer` get the same treatment, and a bare `code` parameter counts too.
+
+Routes that carry secrets in the URL, such as OAuth callbacks, can drop the query and referer entirely:
+
+```python
+cr_service.setup(app, service=SERVICE, settings=settings, redact_paths=["/api/account"])
+```
+
+`cr_service.redact.redact_fields(...)` masks a mapping the same way, for anything logged another way.
 
 `configure_logging(SERVICE)` at import reads `LOG_LEVEL`, `LOG_FORMAT` and `ENVIRONMENT` through `ServiceSettings`.
 It only replaces its own root handler, so handlers added by anything else stay.
 A service with its own logging stack can skip `configure_logging` and keep what it has.
 The context is still available:
 structlog users add `cr_service.logging_config.merge_request_context` to their processors,
+which masks secrets in the context it adds,
 and anything else can read `cr_service.get_context()`.
 
 ## Other helpers

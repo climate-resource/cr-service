@@ -31,6 +31,9 @@ class ServiceSettings(pydantic_settings.BaseSettings):
     log_level: str = "INFO"
     log_format: typing.Literal["json", "text"] = "json"
 
+    log_redact_keys: CommaSeparated = ()
+    """Field and query parameter names to mask in the logs, on top of the ones that look like credentials."""
+
     sentry_dsn: str | None = None
     """Sentry is not initialised when unset."""
 
@@ -96,6 +99,7 @@ class ServiceSettings(pydantic_settings.BaseSettings):
     model_config = pydantic_settings.SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
 
     @pydantic.field_validator(
+        "log_redact_keys",
         "auth_local_permissions",
         "auth_local_feature_flags",
         "auth_local_roles",

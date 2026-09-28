@@ -40,6 +40,20 @@ def test_json_merges_service_request_and_extra():
     assert payload["count"] == 3
 
 
+def test_secrets_are_masked(monkeypatch):
+    monkeypatch.setenv("LOG_REDACT_KEYS", "salt")
+    configure_logging(SERVICE, make_settings())
+    with log_scope(session_token="t"):
+        payload = json.loads(
+            JsonFormatter().format(make_record(password="p", salt="s", body={"api_key": "k", "n": 1}))
+        )
+        assert merge_request_context(None, "info", {})["session_token"] == "[redacted]"
+    assert payload["session_token"] == "[redacted]"
+    assert payload["password"] == "[redacted]"
+    assert payload["salt"] == "[redacted]"
+    assert payload["body"] == {"api_key": "[redacted]", "n": 1}
+
+
 def test_json_exception():
     record = make_record()
     try:

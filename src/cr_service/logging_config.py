@@ -16,6 +16,7 @@ import time
 from collections.abc import MutableMapping
 from typing import Any
 
+from cr_service import redact
 from cr_service.context import get_context
 from cr_service.info import ServiceInfo
 from cr_service.settings import ServiceSettings
@@ -44,7 +45,7 @@ def _record_fields(record: logging.LogRecord) -> dict[str, Any]:
         if key in _RESERVED_LOG_RECORD_KEYS or key.startswith("_"):
             continue
         fields[key] = value
-    return fields
+    return redact.redact_fields(fields)
 
 
 class JsonFormatter(logging.Formatter):
@@ -85,7 +86,7 @@ def merge_request_context(
     _logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]
 ) -> MutableMapping[str, Any]:
     """Structlog processor that adds the request context, for services that log through structlog."""
-    for key, value in get_context().items():
+    for key, value in redact.redact_fields(get_context()).items():
         event_dict.setdefault(key, value)
     return event_dict
 
@@ -99,6 +100,7 @@ def configure_logging(service: ServiceInfo, settings: ServiceSettings | None = N
     Handlers installed by anything else, such as pytest, are left alone.
     """
     settings = settings or ServiceSettings()
+    redact.configure(settings.log_redact_keys)
     _ENV_CONTEXT.clear()
     _ENV_CONTEXT.update(build_env_context(service, settings.environment))
 
