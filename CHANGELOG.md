@@ -21,6 +21,13 @@ from the examples given in that link.
 
 <!-- towncrier release notes start -->
 
+## cr-service v0.3.1 (2026-09-28)
+
+### Bug Fixes
+
+- Names the OpenAPI security scheme `HTTPBearer` with the description "Access token", so the schema no longer names the identity provider. ([#9](https://github.com/climate-resource/cr-service/pull/9))
+
+
 ## cr-service v0.3.0 (2026-09-28)
 
 ### Features
