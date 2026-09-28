@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync --frozen --all-extras
+      - run: make test
+
+  mypy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+        with:
+          python-version: "3.13"
+      - run: uv sync --frozen --all-extras
+      - run: make mypy
+
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+        with:
+          python-version: "3.13"
+      - run: uv sync --frozen --all-extras
+      - run: SKIP=mypy uv run pre-commit run --all-files --show-diff-on-failure
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+        with:
+          python-version: "3.13"
+      - run: uv build
+      - name: Check the built wheel imports
+        run: uv run --isolated --no-project --with dist/*.whl python -c "import cr_service.auth.testing"
+
+  changelog:
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+        with:
+          python-version: "3.13"
+      - run: uv sync --frozen
+      - name: Check that a changelog fragment was added
+        if: "!contains(github.event.pull_request.labels.*.name, 'no-changelog')"
+        run: |
+          if git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -qE '^changelog/[0-9]+\.'; then
+            uv run towncrier build --draft --version 0.0.0
+          else
+            echo "::error::Add a changelog fragment: changelog/${{ github.event.number }}.<type>.md"
+            exit 1
+          fi

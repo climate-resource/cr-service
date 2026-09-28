@@ -1,0 +1,44 @@
+name: Bump version
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump_rule:
+        type: choice
+        description: How to bump the version (stable converts the dev version to a stable release)
+        required: true
+        options:
+          - stable
+          - patch
+          - minor
+          - major
+          - "patch alpha"
+          - "patch beta"
+          - "patch rc"
+          - "minor alpha"
+          - "minor beta"
+          - "minor rc"
+          - "major alpha"
+          - "major beta"
+          - "major rc"
+      update_changelog:
+        type: boolean
+        description: Run towncrier to update the CHANGELOG before tagging
+        required: false
+        default: true
+
+jobs:
+  bump:
+    uses: climate-resource/github-actions/.github/workflows/bump.yaml@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+    permissions:
+      contents: write
+    with:
+      bump-rule: ${{ inputs.bump_rule }}
+      update-changelog: ${{ inputs.update_changelog }}
+      python-version: "3.13"
+      dynamic-versioning: true
+      create-release: true
+      release-draft: false
+      release-changelog-path: CHANGELOG.md
+    secrets:
+      token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}

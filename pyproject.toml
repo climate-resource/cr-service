@@ -1,0 +1,119 @@
+[project]
+name = "cr-service"
+description = "WorkOS authentication, logging and observability for Climate Resource FastAPI services"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENCE"]
+authors = [{ name = "Jared Lewis", email = "jared.lewis@climate-resource.com" }]
+classifiers = [
+    "Framework :: FastAPI",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Typing :: Typed",
+]
+dependencies = [
+    "fastapi>=0.115.12",
+    "httpx>=0.28.1",
+    "prometheus-fastapi-instrumentator>=7.0.0",
+    "pydantic-settings>=2.9.1",
+    "pyjwt[crypto]>=2.10.1",
+    "sentry-sdk[fastapi]>=2.70.0",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+profiling = ["pyroscope-io>=0.8.7"]
+tracing = [
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
+    "opentelemetry-sdk>=1.30.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/climate-resource/cr-service"
+Changelog = "https://github.com/climate-resource/cr-service/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0"
+
+[tool.hatch.version.raw-options]
+dist_name = "cr-service"
+git_describe_command = "git describe --dirty --tags --long --match 'v[0-9]*' --exclude '*-*'"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cr_service"]
+
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.15.0",
+    "opentelemetry-sdk>=1.30.0",
+    "pre-commit>=4.2.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=1.0.0",
+    "pytest-cov>=6.1.1",
+    "respx>=0.22.0",
+    "ruff>=0.11.8",
+    "towncrier>=24.8.0",
+    "uvicorn>=0.34.0",
+]
+
+[tool.ruff]
+src = ["src"]
+target-version = "py312"
+line-length = 110
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "D", "PL", "TRY", "RUF", "UP", "S"]
+ignore = ["D200", "D400", "TRY003", "S101"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.isort]
+known-first-party = ["cr_service"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "PLR2004", "S105", "S106"]
+
+[tool.mypy]
+files = ["src"]
+strict = true
+plugins = ["pydantic.mypy"]
+disallow_any_unimported = true
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined"]
+
+[[tool.mypy.overrides]]
+module = ["opentelemetry.*", "pyroscope"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.coverage.run]
+source = ["src"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+skip_empty = true
+show_missing = true
+exclude_also = ["if TYPE_CHECKING:", "@typing.overload"]

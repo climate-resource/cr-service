@@ -1,0 +1,26 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+        with:
+          python-version: "3.13"
+      - run: uv build
+      - name: Check the built wheel imports
+        run: uv run --isolated --no-project --with dist/*.whl python -c "import cr_service.auth.testing"
+      - run: uv publish --trusted-publishing always
