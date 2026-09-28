@@ -110,7 +110,7 @@ def test_security_scheme_in_openapi(client):
     assert schema["components"]["securitySchemes"]["HTTPBearer"] == {
         "type": "http",
         "scheme": "bearer",
-        "description": "WorkOS access token",
+        "description": "Access token",
     }
 
 
