@@ -17,7 +17,7 @@ from cr_service.settings import ServiceSettings
 
 logger = logging.getLogger(__name__)
 
-bearer_scheme = HTTPBearer(auto_error=False, scheme_name="WorkOS", description="WorkOS access token")
+bearer_scheme = HTTPBearer(auto_error=False, description="Access token")
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
