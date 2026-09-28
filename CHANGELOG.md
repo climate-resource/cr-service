@@ -21,6 +21,13 @@ from the examples given in that link.
 
 <!-- towncrier release notes start -->
 
+## cr-service v0.2.0 (2026-09-28)
+
+### Trivial/Internal Changes
+
+- [#4](https://github.com/climate-resource/cr-service/pull/4)
+
+
 ## cr-service v0.1.0 (2026-09-28)
 
 ### Features
