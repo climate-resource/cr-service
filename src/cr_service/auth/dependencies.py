@@ -9,7 +9,7 @@ import fastapi
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from cr_service import context
-from cr_service.auth.authenticator import Authenticator, build_authenticator
+from cr_service.auth.authenticator import Authenticator, LocalAuthenticator, build_authenticator
 from cr_service.auth.errors import AuthenticationError, AuthError, AuthorizationError
 from cr_service.auth.hooks import FailureHook, SuccessHook, log_auth_failure, observe_principal
 from cr_service.auth.principal import ANONYMOUS, Principal
@@ -105,7 +105,8 @@ async def _authenticate(
         _refuse(request, error)
         return ANONYMOUS if required else None
 
-    context.bind(auth_outcome="pass")
+    skipped = isinstance(installed.authenticator, LocalAuthenticator)
+    context.bind(auth_outcome="skipped" if skipped else "pass")
     for hook in (observe_principal, *installed.config.on_success):
         hook(request, principal)
     request.state.principal = principal

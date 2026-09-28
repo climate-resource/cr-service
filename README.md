@@ -182,6 +182,12 @@ set the Sentry user id and `organization_id` tag, stamp `enduser.id` on the span
 and log an `auth_failed` record with the reason for each refusal.
 Emails and names are never attached.
 
+Each attempt also binds `auth_outcome`,
+which is `pass`, `fail`, `shadow_fail` or `skipped` for `AUTH_PROVIDER=local`.
+Responses carry it as the `x-auth-status` header, with `shadow_fail` reported as `fail`.
+A service with its own auth gets the header by binding `auth_outcome` itself.
+A route that never checks auth, or an optional one called without a token, gets no header.
+
 ## Logging
 
 `cr_service.bind(**fields)` adds fields to the current request's log context.

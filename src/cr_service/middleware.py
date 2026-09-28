@@ -21,6 +21,9 @@ logger = logging.getLogger("access")
 # Probe hits are logged at debug so they do not drown out real traffic.
 _PROBE_PATHS = frozenset({"/livez", "/readyz", "/metrics"})
 
+# Shadow failures report as fail, so clients see the outcome enforcement would have.
+_AUTH_STATUS_HEADER = {"pass": b"pass", "skipped": b"skipped", "fail": b"fail", "shadow_fail": b"fail"}
+
 
 def _resolve_request_id(request: fastapi.Request) -> str:
     """Reuse an upstream correlation id if present, otherwise mint one."""
@@ -37,7 +40,7 @@ def _client_ip(request: fastapi.Request) -> str | None:
 
 
 class WideEventMiddleware:
-    """Emit one wide event per HTTP request and stamp correlation headers.
+    """Emit one wide event per HTTP request and stamp correlation and auth status headers.
 
     Each request runs inside a fresh log scope holding its ``request_id``,
     so every record logged while it runs carries the id,
@@ -76,6 +79,9 @@ class WideEventMiddleware:
                 headers = list(message.get("headers", []))
                 headers.append((b"x-request-id", request_id.encode()))
                 headers.append((b"x-process-time", f"{time.perf_counter() - start:.6f}".encode()))
+                auth_status = _AUTH_STATUS_HEADER.get(context.get_context().get("auth_outcome", ""))
+                if auth_status and not any(name.lower() == b"x-auth-status" for name, _ in headers):
+                    headers.append((b"x-auth-status", auth_status))
                 message["headers"] = headers
             elif message["type"] == "http.response.body":
                 response_bytes += len(message.get("body", b""))

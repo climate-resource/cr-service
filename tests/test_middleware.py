@@ -92,3 +92,20 @@ def test_forwarded_prefix(app):
     client = TestClient(app)
     assert client.get("/root", headers={"x-forwarded-prefix": "/svc/"}).json() == {"root_path": "/svc"}
     assert client.get("/root", headers={"x-forwarded-prefix": "svc"}).json() == {"root_path": ""}
+
+
+def test_auth_status_header_from_service_auth():
+    app = build_app(make_settings(), auth=None)
+
+    @app.get("/own-auth")
+    def own_auth() -> None:
+        bind(auth_outcome="shadow_fail")
+
+    @app.get("/own-header")
+    def own_header(response: fastapi.Response) -> None:
+        bind(auth_outcome="pass")
+        response.headers["x-auth-status"] = "skipped"
+
+    client = TestClient(app)
+    assert client.get("/own-auth").headers["x-auth-status"] == "fail"
+    assert client.get("/own-header").headers.get_list("x-auth-status") == ["skipped"]

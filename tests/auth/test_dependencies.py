@@ -61,6 +61,13 @@ def test_invalid_token(client, tokens):
     assert response.json() == {"detail": "Access token has expired"}
 
 
+def test_auth_status_header(client, tokens):
+    assert client.get("/me", headers=tokens.headers()).headers["x-auth-status"] == "pass"
+    assert client.get("/me").headers["x-auth-status"] == "fail"
+    assert client.post("/things", headers=tokens.headers()).headers["x-auth-status"] == "fail"
+    assert "x-auth-status" not in client.get("/maybe").headers
+
+
 def test_optional_principal(client, tokens):
     assert client.get("/maybe").json() == {"id": None}
     assert client.get("/maybe", headers=tokens.headers(user_id="user_1")).json() == {"id": "user_1"}
@@ -102,7 +109,9 @@ def test_shadow_mode_lets_failures_through(tokens, caplog):
     settings = make_settings(environment="staging", auth_enforce=False)
     client = TestClient(add_routes(build_app(settings, tokens)))
     assert any(record.msg.startswith("Auth is in shadow mode") for record in caplog.records)
-    assert client.get("/me").json() == {"id": "anonymous", "kind": "anonymous"}
+    response = client.get("/me")
+    assert response.json() == {"id": "anonymous", "kind": "anonymous"}
+    assert response.headers["x-auth-status"] == "fail"
     assert client.post("/things", headers=tokens.headers()).status_code == 200
     assert client.get("/maybe", headers=tokens.headers("junk")).json() == {"id": None}
     assert [record.auth_error for record in caplog.records if record.msg == "auth_failed"] == [
@@ -115,7 +124,9 @@ def test_shadow_mode_lets_failures_through(tokens, caplog):
 def test_local_provider():
     settings = make_settings(auth_provider="local", auth_local_permissions=("things:write",))
     client = TestClient(add_routes(build_app(settings)))
-    assert client.get("/me").json() == {"id": "user_local", "kind": "local"}
+    response = client.get("/me")
+    assert response.json() == {"id": "user_local", "kind": "local"}
+    assert response.headers["x-auth-status"] == "skipped"
     assert client.post("/things").status_code == 200
 
 
