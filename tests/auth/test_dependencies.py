@@ -107,7 +107,7 @@ def test_require_feature_flag(client, tokens):
 
 def test_security_scheme_in_openapi(client):
     schema = client.get("/openapi.json").json()
-    assert schema["components"]["securitySchemes"]["WorkOS"] == {
+    assert schema["components"]["securitySchemes"]["HTTPBearer"] == {
         "type": "http",
         "scheme": "bearer",
         "description": "WorkOS access token",
