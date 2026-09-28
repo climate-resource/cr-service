@@ -20,3 +20,9 @@ from the examples given in that link.
 -->
 
 <!-- towncrier release notes start -->
+
+## cr-service v0.1.0 (2026-09-28)
+
+### Features
+
+- Adds WorkOS access-token verification with FastAPI dependencies, baked-in production and staging WorkOS settings, request-scoped log context, the wide-event middleware, Sentry, tracing, metrics, profiling and health probes. ([#1](https://github.com/climate-resource/cr-service/pull/1))
