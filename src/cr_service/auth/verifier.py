@@ -60,6 +60,11 @@ class TokenVerifier:
     machine_clients
         Machine client ids allowed in, each mapped to the permissions it is granted.
         Permissions come from here, never from the token.
+    machine_organizations
+        Machine client ids mapped to the organisations they may act for.
+        A listed client's tokens must carry one of them as ``org_id``.
+    require_email
+        Refuse user tokens without an ``email`` claim.
     """
 
     def __init__(
@@ -68,12 +73,19 @@ class TokenVerifier:
         *,
         accepted_client_ids: typing.Iterable[str],
         machine_clients: Mapping[str, typing.Iterable[str]] | None = None,
+        machine_organizations: Mapping[str, typing.Iterable[str]] | None = None,
+        require_email: bool = False,
     ) -> None:
         self._profiles = {profile.issuer: profile for profile in profiles}
         self._accepted_client_ids = frozenset(accepted_client_ids)
         self._machine_clients = {
             client_id: frozenset(permissions) for client_id, permissions in (machine_clients or {}).items()
         }
+        self._machine_organizations = {
+            client_id: frozenset(organizations)
+            for client_id, organizations in (machine_organizations or {}).items()
+        }
+        self._require_email = require_email
 
     async def verify(self, token: str) -> Principal:
         """Verify ``token`` and return the caller, raising :class:`AuthenticationError` if it is not valid."""
@@ -117,11 +129,15 @@ class TokenVerifier:
         permissions = self._machine_clients.get(subject)
         if permissions is None:
             raise AuthenticationError("Machine client is not allowed")
+        organization_id = _str_claim(claims, "org_id")
+        organizations = self._machine_organizations.get(subject)
+        if organizations is not None and organization_id not in organizations:
+            raise AuthenticationError("Machine client is not allowed to act for this organisation")
         return Principal(
             kind="machine",
             id=subject,
             client_id=subject,
-            organization_id=_str_claim(claims, "org_id"),
+            organization_id=organization_id,
             permissions=permissions,
             token_id=_str_claim(claims, "jti"),
             claims=claims,
@@ -131,6 +147,9 @@ class TokenVerifier:
         client_id = _str_claim(claims, "client_id")
         if client_id is not None and client_id not in self._accepted_client_ids:
             raise AuthenticationError("Access token was issued for a different application")
+        email = _str_claim(claims, "email")
+        if self._require_email and email is None:
+            raise AuthenticationError("Access token has no email")
         roles = _str_set_claim(claims, "roles")
         return Principal(
             kind="user",
@@ -140,7 +159,7 @@ class TokenVerifier:
             feature_flags=_str_set_claim(claims, "feature_flags"),
             role=_str_claim(claims, "role"),
             roles=tuple(sorted(roles)),
-            email=_str_claim(claims, "email"),
+            email=email,
             email_verified=_bool_claim(claims, "email_verified"),
             first_name=_str_claim(claims, "first_name"),
             last_name=_str_claim(claims, "last_name"),

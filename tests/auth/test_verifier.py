@@ -142,6 +142,32 @@ async def test_machine_token(machine_settings, tokens):
     assert principal.organization_id == "org_test"
 
 
+@pytest.mark.parametrize(("organization_id", "allowed"), [("org_a", True), ("org_b", False), (None, False)])
+async def test_machine_client_organizations(tokens, organization_id, allowed):
+    settings = make_settings(
+        workos_machine_clients={"client_publisher": [], "client_free": []},
+        workos_machine_client_organizations={"client_publisher": ["org_a"]},
+    )
+    authenticator = tokens.authenticator(settings)
+    token = tokens.machine_token(client_id="client_publisher", organization_id=organization_id)
+    if allowed:
+        assert (await authenticator.authenticate(token)).organization_id == "org_a"
+    else:
+        with pytest.raises(AuthenticationError, match="this organisation"):
+            await authenticator.authenticate(token)
+    unbound = tokens.machine_token(client_id="client_free", organization_id=None)
+    assert (await authenticator.authenticate(unbound)).organization_id is None
+
+
+async def test_require_email(tokens):
+    settings = make_settings(workos_require_email=True, workos_machine_clients={"client_publisher": []})
+    authenticator = tokens.authenticator(settings)
+    with pytest.raises(AuthenticationError, match="no email"):
+        await authenticator.authenticate(tokens.user_token(email=""))
+    assert (await authenticator.authenticate(tokens.user_token())).email == "test@example.com"
+    assert await authenticator.authenticate(tokens.machine_token(client_id="client_publisher"))
+
+
 async def test_machine_token_not_allowed(machine_settings, tokens):
     with pytest.raises(AuthenticationError, match="not allowed"):
         await tokens.authenticator(machine_settings).authenticate(

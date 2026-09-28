@@ -64,6 +64,11 @@ def test_bookshelf_tokens_refused_by_default():
     assert STAGING.bookshelf_client_id not in make_settings().accepted_client_ids
 
 
+def test_machine_client_organizations_need_known_clients():
+    with pytest.raises(pydantic.ValidationError, match="client_unknown"):
+        make_settings(workos_machine_client_organizations={"client_unknown": ["org_a"]})
+
+
 def test_api_key_is_secret(monkeypatch):
     monkeypatch.setenv("WORKOS_API_KEY", "sk_test_123")
     settings = make_settings()

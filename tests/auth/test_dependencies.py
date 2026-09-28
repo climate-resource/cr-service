@@ -11,6 +11,7 @@ from cr_service.auth import (
     Principal,
     require_feature_flag,
     require_permission,
+    try_authenticate,
 )
 from tests.conftest import SERVICE, build_app, make_settings
 
@@ -66,6 +67,25 @@ def test_auth_status_header(client, tokens):
     assert client.get("/me").headers["x-auth-status"] == "fail"
     assert client.post("/things", headers=tokens.headers()).headers["x-auth-status"] == "fail"
     assert "x-auth-status" not in client.get("/maybe").headers
+
+
+def test_try_authenticate(settings, tokens):
+    app = build_app(settings, tokens)
+
+    @app.get("/graphql")
+    async def graphql(request: fastapi.Request) -> dict[str, str | None]:
+        principal = await try_authenticate(request)
+        return {"id": principal.id if principal else None}
+
+    client = TestClient(app)
+    assert client.get("/graphql", headers=tokens.headers(user_id="user_1")).json() == {"id": "user_1"}
+    response = client.get("/graphql", headers=tokens.headers("junk"))
+    assert response.status_code == 200
+    assert response.json() == {"id": None}
+    assert response.headers["x-auth-status"] == "fail"
+    response = client.get("/graphql")
+    assert response.json() == {"id": None}
+    assert "x-auth-status" not in response.headers
 
 
 def test_optional_principal(client, tokens):
