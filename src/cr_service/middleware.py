@@ -79,7 +79,8 @@ class WideEventMiddleware:
                 headers = list(message.get("headers", []))
                 headers.append((b"x-request-id", request_id.encode()))
                 headers.append((b"x-process-time", f"{time.perf_counter() - start:.6f}".encode()))
-                if auth_status := _AUTH_STATUS_HEADER.get(context.get_context().get("auth_outcome", "")):
+                auth_status = _AUTH_STATUS_HEADER.get(context.get_context().get("auth_outcome", ""))
+                if auth_status and not any(name.lower() == b"x-auth-status" for name, _ in headers):
                     headers.append((b"x-auth-status", auth_status))
                 message["headers"] = headers
             elif message["type"] == "http.response.body":
