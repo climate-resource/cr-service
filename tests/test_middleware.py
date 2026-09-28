@@ -51,13 +51,18 @@ def test_reuses_upstream_request_id(app):
 def test_wide_event(app, access_records, caplog):
     TestClient(app).get(
         "/hello?x=1&access_token=secret&Code=abc",
-        headers={"x-request-id": "req-1", "x-forwarded-for": "1.2.3.4, 10.0.0.1"},
+        headers={
+            "x-request-id": "req-1",
+            "x-forwarded-for": "1.2.3.4, 10.0.0.1",
+            "referer": "https://portal.example/cb?code=abc&page=2",
+        },
     )
     event = access_records()[-1]
     assert event.msg == "http_request"
     assert event.request_id == "req-1"
     assert event.method == "GET"
     assert event.path == "/hello"
+    assert event.referer == "https://portal.example/cb?code=[redacted]&page=2"
     assert event.query == {"x": "1", "access_token": "[redacted]", "Code": "[redacted]"}
     assert event.status == 200
     assert event.client_ip == "1.2.3.4"

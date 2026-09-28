@@ -67,6 +67,10 @@ def test_bookshelf_tokens_refused_by_default():
 def test_machine_client_organizations_need_known_clients():
     with pytest.raises(pydantic.ValidationError, match="client_unknown"):
         make_settings(workos_machine_client_organizations={"client_unknown": ["org_a"]})
+    with pytest.raises(pydantic.ValidationError, match="no organisations"):
+        make_settings(
+            workos_machine_clients={"client_m2m": []}, workos_machine_client_organizations={"client_m2m": []}
+        )
 
 
 def test_api_key_is_secret(monkeypatch):

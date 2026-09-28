@@ -153,10 +153,17 @@ async def test_machine_client_organizations(tokens, organization_id, allowed):
     if allowed:
         assert (await authenticator.authenticate(token)).organization_id == "org_a"
     else:
-        with pytest.raises(AuthenticationError, match="this organisation"):
+        with pytest.raises(AuthenticationError, match="organisation"):
             await authenticator.authenticate(token)
-    unbound = tokens.machine_token(client_id="client_free", organization_id=None)
-    assert (await authenticator.authenticate(unbound)).organization_id is None
+    unbound = tokens.machine_token(client_id="client_free", organization_id="org_b")
+    assert (await authenticator.authenticate(unbound)).organization_id == "org_b"
+
+
+async def test_machine_token_needs_organization(machine_settings, tokens):
+    with pytest.raises(AuthenticationError, match="no organisation"):
+        await tokens.authenticator(machine_settings).authenticate(
+            tokens.machine_token(client_id="client_publisher", organization_id=None)
+        )
 
 
 async def test_require_email(tokens):

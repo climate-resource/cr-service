@@ -3,6 +3,7 @@
 import http
 import logging
 import time
+import urllib.parse
 import uuid
 from typing import Any
 
@@ -28,6 +29,20 @@ _REDACTED_QUERY_KEYS = frozenset(
 
 # Shadow failures report as fail, so clients see the outcome enforcement would have.
 _AUTH_STATUS_HEADER = {"pass": b"pass", "skipped": b"skipped", "fail": b"fail", "shadow_fail": b"fail"}
+
+
+def _redact_url(url: str | None) -> str | None:
+    if not url or "?" not in url:
+        return url
+    parsed = urllib.parse.urlsplit(url)
+    query = urllib.parse.urlencode(
+        [
+            (key, "[redacted]" if key.lower() in _REDACTED_QUERY_KEYS else value)
+            for key, value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        ],
+        safe="[]",
+    )
+    return parsed._replace(query=query).geturl()
 
 
 def _resolve_request_id(request: fastapi.Request) -> str:
@@ -115,7 +130,7 @@ class WideEventMiddleware:
                 "response_bytes": response_bytes,
                 "client_ip": _client_ip(request),
                 "user_agent": request.headers.get("user-agent"),
-                "referer": request.headers.get("referer"),
+                "referer": _redact_url(request.headers.get("referer")),
                 "sentry_trace_id": sentry_sdk.get_current_scope().get_active_propagation_context().trace_id,
                 **current_trace_context(),
             }

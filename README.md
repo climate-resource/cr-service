@@ -142,7 +142,8 @@ or one of `WORKOS_ADDITIONAL_CLIENT_IDS`,
 or the bookshelf CLI's application when `WORKOS_ACCEPT_BOOKSHELF_TOKENS=true`.
 Machine tokens are only accepted from client ids listed in `WORKOS_MACHINE_CLIENTS`,
 and their permissions come from that list, never from the token.
-A client listed in `WORKOS_MACHINE_CLIENT_ORGANIZATIONS` must name one of its organisations as `org_id`.
+Every machine token must carry an `org_id`,
+and a client listed in `WORKOS_MACHINE_CLIENT_ORGANIZATIONS` must name one of its organisations.
 
 ### Bookshelf tokens
 
@@ -206,7 +207,8 @@ The JSON line holds `ts`, `level`, `logger` and `message`,
 then `service`, `version`, `commit`, `env` and `instance_id`,
 then the request context, then the record's `extra`.
 A 422's validation errors land on the wide event as `validation_errors`.
-Token-like query parameters, such as `access_token` and `code`, are logged as `[redacted]`.
+Token-like query parameters, such as `access_token` and `code`, are logged as `[redacted]`,
+in both `query` and `referer`.
 
 `configure_logging(SERVICE)` at import reads `LOG_LEVEL`, `LOG_FORMAT` and `ENVIRONMENT` through `ServiceSettings`.
 It only replaces its own root handler, so handlers added by anything else stay.

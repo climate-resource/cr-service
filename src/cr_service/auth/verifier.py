@@ -130,6 +130,8 @@ class TokenVerifier:
         if permissions is None:
             raise AuthenticationError("Machine client is not allowed")
         organization_id = _str_claim(claims, "org_id")
+        if organization_id is None:
+            raise AuthenticationError("Machine token has no organisation")
         organizations = self._machine_organizations.get(subject)
         if organizations is not None and organization_id not in organizations:
             raise AuthenticationError("Machine client is not allowed to act for this organisation")

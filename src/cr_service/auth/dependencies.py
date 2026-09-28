@@ -111,7 +111,7 @@ async def _authenticate(
         if not required and isinstance(error, AuthenticationError) and error.missing:
             return None
         if not refuse:
-            _record_failure(request, error, "fail")
+            _record_failure(request, error, "fail" if installed.enforce else "shadow_fail")
             return None
         _refuse(request, error)
         return ANONYMOUS if required else None
@@ -149,7 +149,7 @@ async def try_authenticate(request: fastapi.Request) -> Principal | None:
     """Return the caller, or ``None`` without a valid token, never refusing the request.
 
     For code that decides access itself, such as a GraphQL context.
-    Failures still run the failure hooks and set ``x-auth-status``.
+    Failures, including a JWKS outage, still run the failure hooks and set ``x-auth-status``.
     """
     return await _authenticate(request, await bearer_scheme(request), required=False, refuse=False)
 
