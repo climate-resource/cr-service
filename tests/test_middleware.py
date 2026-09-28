@@ -80,6 +80,43 @@ def test_validation_errors_on_wide_event(app, access_records):
     ]
 
 
+def test_5xx_without_exception_logs_error(app, access_records):
+    @app.get("/unavailable")
+    def unavailable() -> fastapi.Response:
+        return fastapi.Response(status_code=503)
+
+    TestClient(app).get("/unavailable")
+    assert access_records()[-1].levelno == logging.ERROR
+    TestClient(app).get("/hello")
+    assert access_records()[-1].levelno == logging.INFO
+
+
+def test_failing_probe_warns(access_records):
+    app = build_app(make_settings(), auth=None, readiness_checks=[lambda: False])
+    TestClient(app).get("/readyz")
+    event = access_records()[-1]
+    assert event.status == 503
+    assert event.levelno == logging.WARNING
+
+
+def test_redact_paths(access_records):
+    app = build_app(make_settings(), auth=None, redact_paths=["/api/account/"])
+
+    @app.get("/api/account/callback")
+    def callback() -> None: ...
+
+    @app.get("/api/accounts")
+    def accounts() -> None: ...
+
+    client = TestClient(app)
+    client.get("/api/account/callback?state=s&page=1", headers={"referer": "https://idp.example/?x=1"})
+    event = access_records()[-1]
+    assert event.query == {}
+    assert event.referer is None
+    client.get("/api/accounts?page=1")
+    assert access_records()[-1].query == {"page": "1"}
+
+
 def test_unhandled_error(app, access_records):
     response = TestClient(app, raise_server_exceptions=False).get("/boom")
     assert response.status_code == 500

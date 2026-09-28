@@ -27,12 +27,14 @@ def setup(  # noqa: PLR0913
     auth: AuthConfig | None = AuthConfig(),
     readiness_checks: Iterable[ReadinessCheck] = (),
     sentry_options: Mapping[str, typing.Any] | None = None,
+    redact_paths: Iterable[str] = (),
 ) -> None:
     """Install logging, Sentry, profiling, the wide event, health probes, metrics, tracing and auth.
 
     Call it after adding the service's own middleware, such as CORS,
     so the wide event and the trace wrap them.
     Pass ``auth=None`` for a service with no authenticated routes.
+    ``redact_paths`` are logged without their query or referer, for routes such as OAuth callbacks.
     """
     configure_logging(service, settings)
     init_sentry(settings, service, **(sentry_options or {}))
@@ -42,7 +44,7 @@ def setup(  # noqa: PLR0913
     app.state.readiness_checks = [*checks, *readiness_checks]
     app.add_exception_handler(RequestValidationError, record_validation_errors)
 
-    app.add_middleware(WideEventMiddleware)
+    app.add_middleware(WideEventMiddleware, redact_paths=redact_paths)
     app.add_middleware(RouteTagMiddleware)
     app.add_middleware(ForwardedPrefixMiddleware)
 
