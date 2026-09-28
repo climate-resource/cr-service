@@ -3,6 +3,7 @@
 import http
 import logging
 import time
+import urllib.parse
 import uuid
 from typing import Any
 
@@ -21,8 +22,27 @@ logger = logging.getLogger("access")
 # Probe hits are logged at debug so they do not drown out real traffic.
 _PROBE_PATHS = frozenset({"/livez", "/readyz", "/metrics"})
 
+# Tokens belong in headers, but one pasted into a URL must still stay out of the log.
+_REDACTED_QUERY_KEYS = frozenset(
+    {"token", "access_token", "id_token", "refresh_token", "code", "client_secret"}
+)
+
 # Shadow failures report as fail, so clients see the outcome enforcement would have.
 _AUTH_STATUS_HEADER = {"pass": b"pass", "skipped": b"skipped", "fail": b"fail", "shadow_fail": b"fail"}
+
+
+def _redact_url(url: str | None) -> str | None:
+    if not url or "?" not in url:
+        return url
+    parsed = urllib.parse.urlsplit(url)
+    query = urllib.parse.urlencode(
+        [
+            (key, "[redacted]" if key.lower() in _REDACTED_QUERY_KEYS else value)
+            for key, value in urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        ],
+        safe="[]",
+    )
+    return parsed._replace(query=query).geturl()
 
 
 def _resolve_request_id(request: fastapi.Request) -> str:
@@ -101,13 +121,16 @@ class WideEventMiddleware:
                 "event": "http_request",
                 "method": request.method,
                 "path": request.url.path,
-                "query": dict(request.query_params),
+                "query": {
+                    key: "[redacted]" if key.lower() in _REDACTED_QUERY_KEYS else value
+                    for key, value in request.query_params.items()
+                },
                 "status": status_code,
                 "duration_ms": round((time.perf_counter() - start) * 1000, 2),
                 "response_bytes": response_bytes,
                 "client_ip": _client_ip(request),
                 "user_agent": request.headers.get("user-agent"),
-                "referer": request.headers.get("referer"),
+                "referer": _redact_url(request.headers.get("referer")),
                 "sentry_trace_id": sentry_sdk.get_current_scope().get_active_propagation_context().trace_id,
                 **current_trace_context(),
             }

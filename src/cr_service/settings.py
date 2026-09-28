@@ -84,6 +84,15 @@ class ServiceSettings(pydantic_settings.BaseSettings):
     workos_machine_clients: dict[str, tuple[str, ...]] = pydantic.Field(default_factory=dict)
     """Machine client ids allowed in, as JSON mapping each to the permissions it is granted."""
 
+    workos_machine_client_organizations: dict[str, tuple[str, ...]] = pydantic.Field(default_factory=dict)
+    """Organisations each machine client may act for, as JSON.
+
+    A listed client's tokens must name one of them.
+    """
+
+    workos_require_email: bool = False
+    """Refuse user tokens without an ``email`` claim."""
+
     model_config = pydantic_settings.SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
 
     @pydantic.field_validator(
@@ -116,6 +125,15 @@ class ServiceSettings(pydantic_settings.BaseSettings):
                 raise ValueError("AUTH_ENFORCE=false needs AUTH_ALLOW_PRODUCTION_SHADOW=true in production")
             if self.workos.name != "production":
                 raise ValueError("Production must verify tokens from the production WorkOS environment")
+        if empty := [client for client, orgs in self.workos_machine_client_organizations.items() if not orgs]:
+            raise ValueError(
+                f"WORKOS_MACHINE_CLIENT_ORGANIZATIONS gives no organisations for {', '.join(empty)}"
+            )
+        if unknown := set(self.workos_machine_client_organizations) - set(self.workos_machine_clients):
+            raise ValueError(
+                f"WORKOS_MACHINE_CLIENT_ORGANIZATIONS names clients missing from WORKOS_MACHINE_CLIENTS: "
+                f"{', '.join(sorted(unknown))}"
+            )
         return self
 
     def __hash__(self) -> int:

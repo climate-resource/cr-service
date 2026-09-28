@@ -130,6 +130,8 @@ def build_authenticator(settings: ServiceSettings, *, keys: KeySource | None = N
         profiles,
         accepted_client_ids=settings.accepted_client_ids,
         machine_clients=settings.workos_machine_clients,
+        machine_organizations=settings.workos_machine_client_organizations,
+        require_email=settings.workos_require_email,
     )
     return WorkOSAuthenticator(
         verifier,

@@ -91,6 +91,8 @@ Field names map straight to variable names.
 | `WORKOS_REQUIRED_FEATURE_FLAG` | unset | Feature flag the user's organisation must have, such as `app:bookshelf`. |
 | `WORKOS_ALLOWED_ORGANIZATION_IDS` | empty | Organisations allowed in. Empty allows any. |
 | `WORKOS_MACHINE_CLIENTS` | `{}` | JSON mapping machine client ids to the permissions each is granted. |
+| `WORKOS_MACHINE_CLIENT_ORGANIZATIONS` | `{}` | JSON mapping machine client ids to the organisations each may act for. |
+| `WORKOS_REQUIRE_EMAIL` | `false` | Refuse user tokens without an `email` claim. |
 | `WORKOS_ENVIRONMENT` | from `ENVIRONMENT` | `production` or `staging`, to override the mapping below. |
 | `WORKOS_API_KEY` | unset | Secret. Only needed for `WorkOSClient`. |
 
@@ -120,6 +122,8 @@ The issuer names the environment's default application, not the service's own.
 `CurrentPrincipal` answers 401 without a valid token.
 `OptionalPrincipal` is `None` without a token, and still answers 401 for an invalid one.
 `require_permission(...)` and `require_feature_flag(...)` answer 403.
+`await try_authenticate(request)` returns the caller or `None` and never refuses,
+for code that decides access itself, such as a GraphQL context.
 Guard on permissions, never on role names.
 
 A verified token becomes a `Principal`:
@@ -132,11 +136,14 @@ A verified token becomes a `Principal`:
 - `claims` holds every verified claim.
 
 User tokens must be RS256, signed by the environment key, carry the environment issuer, and not be expired.
+With `WORKOS_REQUIRE_EMAIL=true` they must also carry an email.
 When a token names the application it was minted for, that must be `WORKOS_CLIENT_ID`
 or one of `WORKOS_ADDITIONAL_CLIENT_IDS`,
 or the bookshelf CLI's application when `WORKOS_ACCEPT_BOOKSHELF_TOKENS=true`.
 Machine tokens are only accepted from client ids listed in `WORKOS_MACHINE_CLIENTS`,
 and their permissions come from that list, never from the token.
+Every machine token must carry an `org_id`,
+and a client listed in `WORKOS_MACHINE_CLIENT_ORGANIZATIONS` must name one of its organisations.
 
 ### Bookshelf tokens
 
@@ -200,6 +207,8 @@ The JSON line holds `ts`, `level`, `logger` and `message`,
 then `service`, `version`, `commit`, `env` and `instance_id`,
 then the request context, then the record's `extra`.
 A 422's validation errors land on the wide event as `validation_errors`.
+Token-like query parameters, such as `access_token` and `code`, are logged as `[redacted]`,
+in both `query` and `referer`.
 
 `configure_logging(SERVICE)` at import reads `LOG_LEVEL`, `LOG_FORMAT` and `ENVIRONMENT` through `ServiceSettings`.
 It only replaces its own root handler, so handlers added by anything else stay.

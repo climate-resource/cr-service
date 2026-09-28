@@ -77,18 +77,26 @@ def _http_error(installed: _InstalledAuth, error: AuthError) -> fastapi.HTTPExce
     return fastapi.HTTPException(status_code=error.status_code, detail=str(error), headers=headers)
 
 
+def _record_failure(request: fastapi.Request, error: AuthError, outcome: str) -> None:
+    context.bind(auth_outcome=outcome)
+    for hook in (log_auth_failure, *_installed(request).config.on_failure):
+        hook(request, error)
+
+
 def _refuse(request: fastapi.Request, error: AuthError) -> None:
     """Run the failure hooks, then raise unless in shadow mode."""
     installed = _installed(request)
-    context.bind(auth_outcome="fail" if installed.enforce else "shadow_fail")
-    for hook in (log_auth_failure, *installed.config.on_failure):
-        hook(request, error)
+    _record_failure(request, error, "fail" if installed.enforce else "shadow_fail")
     if installed.enforce:
         raise _http_error(installed, error)
 
 
 async def _authenticate(
-    request: fastapi.Request, credentials: HTTPAuthorizationCredentials | None, *, required: bool
+    request: fastapi.Request,
+    credentials: HTTPAuthorizationCredentials | None,
+    *,
+    required: bool,
+    refuse: bool = True,
 ) -> Principal | None:
     cached = getattr(request.state, "principal", None)
     if isinstance(cached, Principal):
@@ -101,6 +109,9 @@ async def _authenticate(
         )
     except AuthError as error:
         if not required and isinstance(error, AuthenticationError) and error.missing:
+            return None
+        if not refuse:
+            _record_failure(request, error, "fail" if installed.enforce else "shadow_fail")
             return None
         _refuse(request, error)
         return ANONYMOUS if required else None
@@ -132,6 +143,15 @@ async def optional_principal(
 ) -> Principal | None:
     """Return the caller, or ``None`` if the request carries no token. An invalid token is still refused."""
     return await _authenticate(request, credentials, required=False)
+
+
+async def try_authenticate(request: fastapi.Request) -> Principal | None:
+    """Return the caller, or ``None`` without a valid token, never refusing the request.
+
+    For code that decides access itself, such as a GraphQL context.
+    Failures, including a JWKS outage, still run the failure hooks and set ``x-auth-status``.
+    """
+    return await _authenticate(request, await bearer_scheme(request), required=False, refuse=False)
 
 
 CurrentPrincipal = typing.Annotated[Principal, fastapi.Depends(require_principal)]

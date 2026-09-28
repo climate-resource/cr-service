@@ -11,6 +11,7 @@ from cr_service.auth.dependencies import (
     OptionalPrincipal,
     require_feature_flag,
     require_permission,
+    try_authenticate,
 )
 from cr_service.auth.errors import (
     AuthConfigurationError,
@@ -38,4 +39,5 @@ __all__ = [
     "build_authenticator",
     "require_feature_flag",
     "require_permission",
+    "try_authenticate",
 ]
