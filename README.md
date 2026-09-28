@@ -209,12 +209,14 @@ then `service`, `version`, `commit`, `env` and `instance_id`,
 then the request context, then the record's `extra`.
 A 422's validation errors land on the wide event as `validation_errors`.
 The wide event logs at `error` for an unhandled exception or any 5xx, and at `info` otherwise.
+Health probes log at `debug`, or at `warning` when they fail.
 
 ### Secrets
 
-Any field whose name looks like a credential is logged as `[redacted]`, however deeply it is nested.
-That covers names containing `token`, `secret`, `password`, `api_key`, `authorization`, `cookie`,
-`signature`, `credential` or `private_key`, and any name listed in `LOG_REDACT_KEYS`.
+Any field whose name ends in a credential word is logged as `[redacted]`, however deeply it is nested.
+So `access_token`, `db_password`, `apiKey` and `private_key` are masked,
+while `max_tokens` and `password_policy` are not.
+Names listed in `LOG_REDACT_KEYS` are masked too, once `configure_logging` or `setup` has run.
 The wide event's `query` and `referer` get the same treatment, and a bare `code` parameter counts too.
 
 Routes that carry secrets in the URL, such as OAuth callbacks, can drop the query and referer entirely:

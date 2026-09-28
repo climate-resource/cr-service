@@ -54,7 +54,7 @@ class WideEventMiddleware:
         self.app = app
         self._redact_paths = tuple(path.rstrip("/") for path in redact_paths)
 
-    def _redacts(self, path: str) -> bool:
+    def _hides_url_details(self, path: str) -> bool:
         return any(path == prefix or path.startswith(f"{prefix}/") for prefix in self._redact_paths)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -103,19 +103,19 @@ class WideEventMiddleware:
                 status_code = 500
             raise
         finally:
-            private = self._redacts(request.url.path)
+            hide_url_details = self._hides_url_details(request.url.path)
             event: dict[str, Any] = {
                 **context.get_context(),
                 "event": "http_request",
                 "method": request.method,
                 "path": request.url.path,
-                "query": {} if private else redact.redact_query(request.query_params.items()),
+                "query": {} if hide_url_details else redact.redact_query(request.query_params.items()),
                 "status": status_code,
                 "duration_ms": round((time.perf_counter() - start) * 1000, 2),
                 "response_bytes": response_bytes,
                 "client_ip": _client_ip(request),
                 "user_agent": request.headers.get("user-agent"),
-                "referer": None if private else redact.redact_url(request.headers.get("referer")),
+                "referer": None if hide_url_details else redact.redact_url(request.headers.get("referer")),
                 "sentry_trace_id": sentry_sdk.get_current_scope().get_active_propagation_context().trace_id,
                 **current_trace_context(),
             }
@@ -123,12 +123,10 @@ class WideEventMiddleware:
             if error_type:
                 event["error_type"] = error_type
                 logger.error("http_request", extra=event)
-            elif (
-                request.url.path in _PROBE_PATHS
-                and status_code is not None
-                and status_code < http.HTTPStatus.BAD_REQUEST
-            ):
-                logger.debug("http_request", extra=event)
+            elif request.url.path in _PROBE_PATHS:
+                # A failing probe repeats every period, so it warns rather than paging as an error.
+                failing = status_code is None or status_code >= http.HTTPStatus.BAD_REQUEST
+                logger.log(logging.WARNING if failing else logging.DEBUG, "http_request", extra=event)
             elif status_code is not None and status_code >= http.HTTPStatus.INTERNAL_SERVER_ERROR:
                 logger.error("http_request", extra=event)
             else:

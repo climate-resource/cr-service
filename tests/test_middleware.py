@@ -91,6 +91,14 @@ def test_5xx_without_exception_logs_error(app, access_records):
     assert access_records()[-1].levelno == logging.INFO
 
 
+def test_failing_probe_warns(access_records):
+    app = build_app(make_settings(), auth=None, readiness_checks=[lambda: False])
+    TestClient(app).get("/readyz")
+    event = access_records()[-1]
+    assert event.status == 503
+    assert event.levelno == logging.WARNING
+
+
 def test_redact_paths(access_records):
     app = build_app(make_settings(), auth=None, redact_paths=["/api/account/"])
 

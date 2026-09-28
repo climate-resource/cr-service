@@ -10,13 +10,42 @@ def _reset():
 
 
 @pytest.mark.parametrize(
-    "name", ["password", "access_token", "Authorization", "x-api-key", "client_secret", "set-cookie"]
+    "name",
+    [
+        "password",
+        "db_password",
+        "access_token",
+        "accessToken",
+        "Authorization",
+        "x-api-key",
+        "apiKey",
+        "client_secret",
+        "set-cookie",
+        "private_key",
+    ],
 )
 def test_secret_names(name):
     assert redact.is_secret(name)
 
 
-@pytest.mark.parametrize("name", ["user_id", "auth_outcome", "code", "state", "path"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "user_id",
+        "auth_outcome",
+        "code",
+        "state",
+        "path",
+        "token_count",
+        "max_tokens",
+        "tokenizer",
+        "signature_valid",
+        "password_policy",
+        "cookie_consent",
+        "authorization_url",
+        "cache_key",
+    ],
+)
 def test_ordinary_names(name):
     assert not redact.is_secret(name)
 
@@ -44,6 +73,9 @@ def test_query_and_url():
         "page": "2",
         "apikey": "[redacted]",
     }
-    assert redact.redact_url("https://a.example/cb?code=abc&page=2") == "https://a.example/cb?code=[redacted]&page=2"
+    assert (
+        redact.redact_url("https://a.example/cb?code=abc&page=2")
+        == "https://a.example/cb?code=[redacted]&page=2"
+    )
     assert redact.redact_url("https://a.example/cb") == "https://a.example/cb"
     assert redact.redact_url(None) is None
