@@ -18,7 +18,7 @@ jobs:
         python-version: ["3.12", "3.13", "3.14"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
         with:
           python-version: ${{ matrix.python-version }}
@@ -28,7 +28,7 @@ jobs:
   mypy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
         with:
           python-version: "3.13"
@@ -38,7 +38,7 @@ jobs:
   pre-commit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
         with:
           python-version: "3.13"
@@ -48,7 +48,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
@@ -62,7 +62,7 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
