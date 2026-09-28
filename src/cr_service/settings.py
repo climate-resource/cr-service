@@ -36,17 +36,28 @@ class ServiceSettings(pydantic_settings.BaseSettings):
 
     sentry_traces_sample_rate: float = pydantic.Field(default=0.0, ge=0.0, le=1.0)
 
-    auth_provider: typing.Literal["workos", "local"] = "workos"
-    """``local`` lets every request through as a fixed identity, and is refused outside ``local``."""
+    auth_provider: typing.Literal["workos", "local", "fake"] = "workos"
+    """``local`` lets every request through as a fixed identity.
+
+    ``fake`` returns that identity only for ``AUTH_FAKE_TOKEN``. Both are refused outside ``local``.
+    """
 
     auth_enforce: bool = True
-    """``false`` is shadow mode: failures are logged but let through as anonymous. Refused in production."""
+    """``false`` is shadow mode: failures are logged but let through as anonymous.
+
+    Refused in production unless ``AUTH_ALLOW_PRODUCTION_SHADOW`` is set.
+    """
+
+    auth_allow_production_shadow: bool = False
+    """Allows ``AUTH_ENFORCE=false`` in production, for a service still rolling auth out."""
 
     auth_local_user_id: str = "user_local"
     auth_local_email: str = "local@example.com"
     auth_local_organization_id: str | None = None
     auth_local_permissions: CommaSeparated = ()
     auth_local_feature_flags: CommaSeparated = ()
+    auth_local_roles: CommaSeparated = ()
+    auth_fake_token: str = "fake-access-token"  # noqa: S105
 
     workos_environment: WorkOSEnvironmentName | None = None
     """Override the WorkOS environment picked from ``ENVIRONMENT``, for example to test against production."""
@@ -56,6 +67,9 @@ class ServiceSettings(pydantic_settings.BaseSettings):
 
     workos_additional_client_ids: CommaSeparated = ()
     """Other applications whose user tokens are accepted, such as a CLI registered separately."""
+
+    workos_accept_bookshelf_tokens: bool = False
+    """Accept user tokens from the ``bookshelf`` CLI, so ``bookshelf auth token`` works as a bearer token."""
 
     workos_api_key: pydantic.SecretStr | None = None
     """Management API key, only needed to call the WorkOS API."""
@@ -74,6 +88,7 @@ class ServiceSettings(pydantic_settings.BaseSettings):
     @pydantic.field_validator(
         "auth_local_permissions",
         "auth_local_feature_flags",
+        "auth_local_roles",
         "workos_additional_client_ids",
         "workos_allowed_organization_ids",
         mode="before",
@@ -90,13 +105,14 @@ class ServiceSettings(pydantic_settings.BaseSettings):
 
     @pydantic.model_validator(mode="after")
     def _fail_closed(self) -> typing.Self:
-        if self.auth_provider == "local" and self.environment != "local":
+        if self.auth_provider in {"local", "fake"} and self.environment != "local":
             raise ValueError(
-                f"AUTH_PROVIDER=local is only allowed when ENVIRONMENT=local, not {self.environment}"
+                f"AUTH_PROVIDER={self.auth_provider} is only allowed when ENVIRONMENT=local, "
+                f"not {self.environment}"
             )
         if self.environment == "production":
-            if not self.auth_enforce:
-                raise ValueError("AUTH_ENFORCE=false is not allowed in production")
+            if not self.auth_enforce and not self.auth_allow_production_shadow:
+                raise ValueError("AUTH_ENFORCE=false needs AUTH_ALLOW_PRODUCTION_SHADOW=true in production")
             if self.workos.name != "production":
                 raise ValueError("Production must verify tokens from the production WorkOS environment")
         return self
@@ -118,6 +134,8 @@ class ServiceSettings(pydantic_settings.BaseSettings):
         ids = set(self.workos_additional_client_ids)
         if self.workos_client_id:
             ids.add(self.workos_client_id)
+        if self.workos_accept_bookshelf_tokens:
+            ids.add(self.workos.bookshelf_client_id)
         return frozenset(ids)
 
     def public_auth_config(self) -> dict[str, str | None]:

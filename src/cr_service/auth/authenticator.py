@@ -1,5 +1,6 @@
 """Turning a bearer token into a :class:`Principal`."""
 
+import secrets
 import typing
 
 from cr_service.auth.errors import AuthConfigurationError, AuthenticationError, AuthorizationError
@@ -65,23 +66,44 @@ class LocalAuthenticator:
         return self.principal
 
 
+class FakeAuthenticator:
+    """Returns one fixed identity for one known token, so tests and demos still send a bearer token."""
+
+    def __init__(self, principal: Principal, *, token: str) -> None:
+        self.principal = principal
+        self._token = token
+
+    async def authenticate(self, token: str | None) -> Principal:
+        """Return the fixed identity if ``token`` is the known one."""
+        if not token:
+            raise AuthenticationError("Missing bearer token", missing=True)
+        if not secrets.compare_digest(token, self._token):
+            raise AuthenticationError("Access token is not the fake token")
+        return self.principal
+
+
+def _local_principal(settings: ServiceSettings) -> Principal:
+    return Principal(
+        kind="local",
+        id=settings.auth_local_user_id,
+        email=settings.auth_local_email,
+        email_verified=True,
+        organization_id=settings.auth_local_organization_id,
+        permissions=frozenset(settings.auth_local_permissions),
+        feature_flags=frozenset(settings.auth_local_feature_flags),
+        roles=tuple(sorted(set(settings.auth_local_roles))),
+    )
+
+
 def build_authenticator(settings: ServiceSettings, *, keys: KeySource | None = None) -> Authenticator:
     """Build the authenticator the settings describe.
 
     ``keys`` replaces the JWKS fetched from WorkOS, which is how tests sign tokens.
     """
     if settings.auth_provider == "local":
-        return LocalAuthenticator(
-            Principal(
-                kind="local",
-                id=settings.auth_local_user_id,
-                email=settings.auth_local_email,
-                email_verified=True,
-                organization_id=settings.auth_local_organization_id,
-                permissions=frozenset(settings.auth_local_permissions),
-                feature_flags=frozenset(settings.auth_local_feature_flags),
-            )
-        )
+        return LocalAuthenticator(_local_principal(settings))
+    if settings.auth_provider == "fake":
+        return FakeAuthenticator(_local_principal(settings), token=settings.auth_fake_token)
 
     if not settings.accepted_client_ids:
         raise AuthConfigurationError("WORKOS_CLIENT_ID must be set when AUTH_PROVIDER=workos")

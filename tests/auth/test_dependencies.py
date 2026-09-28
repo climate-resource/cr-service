@@ -101,6 +101,7 @@ def test_resource_metadata_hint(tokens):
 def test_shadow_mode_lets_failures_through(tokens, caplog):
     settings = make_settings(environment="staging", auth_enforce=False)
     client = TestClient(add_routes(build_app(settings, tokens)))
+    assert any(record.msg.startswith("Auth is in shadow mode") for record in caplog.records)
     assert client.get("/me").json() == {"id": "anonymous", "kind": "anonymous"}
     assert client.post("/things", headers=tokens.headers()).status_code == 200
     assert client.get("/maybe", headers=tokens.headers("junk")).json() == {"id": None}
@@ -116,6 +117,16 @@ def test_local_provider():
     client = TestClient(add_routes(build_app(settings)))
     assert client.get("/me").json() == {"id": "user_local", "kind": "local"}
     assert client.post("/things").status_code == 200
+
+
+def test_fake_provider():
+    settings = make_settings(auth_provider="fake", auth_local_permissions=("things:write",))
+    client = TestClient(add_routes(build_app(settings)))
+    headers = {"Authorization": "Bearer fake-access-token"}
+    assert client.get("/me", headers=headers).json() == {"id": "user_local", "kind": "local"}
+    assert client.post("/things", headers=headers).status_code == 200
+    assert client.get("/me").status_code == 401
+    assert client.get("/me", headers={"Authorization": "Bearer junk"}).status_code == 401
 
 
 def test_hooks_run(settings, tokens):

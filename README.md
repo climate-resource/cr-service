@@ -79,11 +79,15 @@ Field names map straight to variable names.
 | `SENTRY_DSN` | unset | Sentry is off when unset. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | |
 | `SENTRY_RELEASE` | `<service>@<version>` | The deploy sets it to the revision. |
-| `AUTH_PROVIDER` | `workos` | `local` lets every request in as a fixed identity. Only allowed when `ENVIRONMENT=local`. |
-| `AUTH_ENFORCE` | `true` | `false` is shadow mode: refusals are logged, not enforced. Not allowed in production. |
+| `AUTH_PROVIDER` | `workos` | `local` lets every request in as a fixed identity. `fake` does so only for `AUTH_FAKE_TOKEN`. Both need `ENVIRONMENT=local`. |
+| `AUTH_ENFORCE` | `true` | `false` is shadow mode: refusals are logged, not enforced. |
+| `AUTH_ALLOW_PRODUCTION_SHADOW` | `false` | Allows `AUTH_ENFORCE=false` in production, which is otherwise refused. |
 | `AUTH_LOCAL_PERMISSIONS` | empty | Permissions of the local identity, comma separated. |
+| `AUTH_LOCAL_ROLES` | empty | Roles of the local identity, comma separated. |
+| `AUTH_FAKE_TOKEN` | `fake-access-token` | The one bearer token `AUTH_PROVIDER=fake` accepts. |
 | `WORKOS_CLIENT_ID` | unset | This service's WorkOS application id. Required with `AUTH_PROVIDER=workos`. |
 | `WORKOS_ADDITIONAL_CLIENT_IDS` | empty | Other applications whose user tokens are accepted, such as a CLI. |
+| `WORKOS_ACCEPT_BOOKSHELF_TOKENS` | `false` | Also accept user tokens from the `bookshelf` CLI's application. |
 | `WORKOS_REQUIRED_FEATURE_FLAG` | unset | Feature flag the user's organisation must have, such as `app:bookshelf`. |
 | `WORKOS_ALLOWED_ORGANIZATION_IDS` | empty | Organisations allowed in. Empty allows any. |
 | `WORKOS_MACHINE_CLIENTS` | `{}` | JSON mapping machine client ids to the permissions each is granted. |
@@ -104,6 +108,7 @@ The values are in `cr_service/workos.py`:
 | User-token issuer | `https://auth-api.climateresource.com.au/user_management/client_01KABZE0SFNZXEYZ337HSVBZ36` | `https://auth-api.climateresource.com.au/user_management/client_01KABZE0E62YS9H7BMV6YZGMD1` |
 | User-token JWKS | `https://auth-api.climateresource.com.au/sso/jwks/client_01KABZE0SFNZXEYZ337HSVBZ36` | `https://auth-api.climateresource.com.au/sso/jwks/client_01KABZE0E62YS9H7BMV6YZGMD1` |
 | Machine-token issuer | `https://auth.climateresource.com.au` | `https://balanced-universe-28-staging.authkit.app` |
+| Bookshelf CLI application | `client_01KY695M48CT84XBQ53EDTG8PE` | `client_01M2EV5XYS01J8283Q89M9BHQM` |
 
 Each environment signs every application's tokens with one key,
 so the JWKS is the same whichever application a token was minted for.
@@ -119,7 +124,7 @@ Guard on permissions, never on role names.
 
 A verified token becomes a `Principal`:
 
-- `kind` is `user`, `machine`, `local`, or `anonymous` for a caller let through by shadow mode.
+- `kind` is `user`, `machine`, `local` (from the `local` or `fake` provider), or `anonymous` for a caller let through by shadow mode.
 - `id` is the WorkOS user id, or the machine client id.
 - `organization_id`, `permissions`, `feature_flags`, `role` and `roles` come from the token.
 - `email`, `first_name`, `last_name` and `organization_name` come from the Climate Resource JWT template.
@@ -127,9 +132,22 @@ A verified token becomes a `Principal`:
 
 User tokens must be RS256, signed by the environment key, carry the environment issuer, and not be expired.
 When a token names the application it was minted for, that must be `WORKOS_CLIENT_ID`
-or one of `WORKOS_ADDITIONAL_CLIENT_IDS`.
+or one of `WORKOS_ADDITIONAL_CLIENT_IDS`,
+or the bookshelf CLI's application when `WORKOS_ACCEPT_BOOKSHELF_TOKENS=true`.
 Machine tokens are only accepted from client ids listed in `WORKOS_MACHINE_CLIENTS`,
 and their permissions come from that list, never from the token.
+
+### Bookshelf tokens
+
+With `WORKOS_ACCEPT_BOOKSHELF_TOKENS=true`, anyone signed in with the `bookshelf` CLI can call the service:
+
+```sh
+curl -H "Authorization: Bearer $(bookshelf auth token)" https://my-service.example/v1/me
+```
+
+The CLI refreshes the token when it is due.
+This covers `bookshelf auth login` only.
+Its `bsat_` agent tokens are opaque to WorkOS, so they are still refused.
 
 The JWKS is cached for an hour.
 An unknown key id triggers one early refetch, at most once a minute.
