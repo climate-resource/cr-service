@@ -21,6 +21,26 @@ from the examples given in that link.
 
 <!-- towncrier release notes start -->
 
+## cr-service v0.3.0 (2026-09-28)
+
+### Features
+
+- Adds `WORKOS_ACCEPT_BOOKSHELF_TOKENS`, which accepts user tokens from the `bookshelf` CLI,
+  so `$(bookshelf auth token)` works as a bearer token.
+  Adds `AUTH_PROVIDER=fake`, which returns the local identity only for `AUTH_FAKE_TOKEN`.
+  Adds `AUTH_LOCAL_ROLES`, the roles of the local identity.
+  Adds `AUTH_ALLOW_PRODUCTION_SHADOW`, which allows `AUTH_ENFORCE=false` in production. ([#5](https://github.com/climate-resource/cr-service/pull/5))
+- Adds the `x-auth-status` response header, which is `pass`, `fail` or `skipped`. ([#6](https://github.com/climate-resource/cr-service/pull/6))
+- Adds `WORKOS_MACHINE_CLIENT_ORGANIZATIONS`, which binds machine clients to the organisations they may act for.
+  Refuses machine tokens without an `org_id`.
+  Adds `WORKOS_REQUIRE_EMAIL`, which refuses user tokens without an email.
+  Adds `try_authenticate`, which returns the caller or `None` without refusing the request.
+  Redacts token-like query parameters on the wide event. ([#7](https://github.com/climate-resource/cr-service/pull/7))
+- Masks log fields whose names look like credentials, plus names listed in `LOG_REDACT_KEYS`.
+  Adds `redact_paths` to `setup`, which logs those routes without their query or referer.
+  Logs the wide event at `error` for any 5xx response, not only when the route raised. ([#8](https://github.com/climate-resource/cr-service/pull/8))
+
+
 ## cr-service v0.2.0 (2026-09-28)
 
 ### Trivial/Internal Changes
