@@ -207,6 +207,8 @@ async def test_fake_provider():
 def test_workos_needs_client_id():
     with pytest.raises(AuthConfigurationError, match="WORKOS_CLIENT_ID"):
         build_authenticator(make_settings(workos_client_id=None))
+    with pytest.raises(AuthConfigurationError, match="WORKOS_CLIENT_ID"):
+        build_authenticator(make_settings(workos_client_id=None, workos_accept_bookshelf_tokens=True))
 
 
 def test_builds_jwks_caches():

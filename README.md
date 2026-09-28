@@ -124,7 +124,8 @@ Guard on permissions, never on role names.
 
 A verified token becomes a `Principal`:
 
-- `kind` is `user`, `machine`, `local` (from the `local` or `fake` provider), or `anonymous` for a caller let through by shadow mode.
+- `kind` is `user`, `machine`, `local` (from the `local` or `fake` provider),
+  or `anonymous` for a caller let through by shadow mode.
 - `id` is the WorkOS user id, or the machine client id.
 - `organization_id`, `permissions`, `feature_flags`, `role` and `roles` come from the token.
 - `email`, `first_name`, `last_name` and `organization_name` come from the Climate Resource JWT template.

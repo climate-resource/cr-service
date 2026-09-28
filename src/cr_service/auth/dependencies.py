@@ -49,7 +49,10 @@ def install_auth(app: fastapi.FastAPI, settings: ServiceSettings, config: AuthCo
     """Make the auth dependencies work on ``app``. :func:`cr_service.setup` calls this."""
     config = config or AuthConfig()
     if not settings.auth_enforce:
-        logger.warning("Auth is in shadow mode: failures are logged but not refused")
+        logger.warning(
+            "Auth is in shadow mode: failures are logged but not refused",
+            extra={"environment": settings.environment},
+        )
     app.state.cr_service_auth = _InstalledAuth(
         authenticator=config.authenticator or build_authenticator(settings),
         enforce=settings.auth_enforce,

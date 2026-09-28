@@ -105,7 +105,7 @@ def build_authenticator(settings: ServiceSettings, *, keys: KeySource | None = N
     if settings.auth_provider == "fake":
         return FakeAuthenticator(_local_principal(settings), token=settings.auth_fake_token)
 
-    if not settings.accepted_client_ids:
+    if not settings.workos_client_id:
         raise AuthConfigurationError("WORKOS_CLIENT_ID must be set when AUTH_PROVIDER=workos")
 
     workos = settings.workos

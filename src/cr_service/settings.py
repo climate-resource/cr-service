@@ -39,7 +39,8 @@ class ServiceSettings(pydantic_settings.BaseSettings):
     auth_provider: typing.Literal["workos", "local", "fake"] = "workos"
     """``local`` lets every request through as a fixed identity.
 
-    ``fake`` returns that identity only for ``AUTH_FAKE_TOKEN``. Both are refused outside ``local``.
+    ``fake`` returns that identity only for ``AUTH_FAKE_TOKEN``.
+    Both are refused outside ``local``.
     """
 
     auth_enforce: bool = True
