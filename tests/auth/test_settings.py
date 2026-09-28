@@ -30,10 +30,16 @@ def test_production_refuses_shadow_mode():
         make_settings(environment="production", auth_enforce=False)
 
 
+def test_production_shadow_opt_in():
+    settings = make_settings(environment="production", auth_enforce=False, auth_allow_production_shadow=True)
+    assert not settings.auth_enforce
+
+
 @pytest.mark.parametrize("environment", ["staging", "preview", "production"])
-def test_local_provider_only_locally(environment):
-    with pytest.raises(pydantic.ValidationError, match="AUTH_PROVIDER=local"):
-        make_settings(environment=environment, auth_provider="local")
+@pytest.mark.parametrize("provider", ["local", "fake"])
+def test_local_providers_only_locally(environment, provider):
+    with pytest.raises(pydantic.ValidationError, match=f"AUTH_PROVIDER={provider}"):
+        make_settings(environment=environment, auth_provider=provider)
 
 
 def test_lists_from_environment(monkeypatch):
@@ -46,6 +52,16 @@ def test_lists_from_environment(monkeypatch):
     assert settings.workos_allowed_organization_ids == ("org_a", "org_b")
     assert settings.workos_machine_clients == {"client_m2m": ("things:write",)}
     assert settings.auth_local_permissions == ("a:read", "a:write")
+
+
+@pytest.mark.parametrize(("environment", "workos"), [("staging", STAGING), ("production", PRODUCTION)])
+def test_accept_bookshelf_tokens(environment, workos):
+    settings = make_settings(environment=environment, workos_accept_bookshelf_tokens=True)
+    assert settings.accepted_client_ids == {"client_service", workos.bookshelf_client_id}
+
+
+def test_bookshelf_tokens_refused_by_default():
+    assert STAGING.bookshelf_client_id not in make_settings().accepted_client_ids
 
 
 def test_api_key_is_secret(monkeypatch):

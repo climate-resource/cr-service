@@ -13,7 +13,7 @@ class Principal:
 
     ``kind`` is ``user`` for a person signed in through WorkOS,
     ``machine`` for a client-credentials application,
-    ``local`` for the fixed identity used when ``AUTH_PROVIDER=local``,
+    ``local`` for the fixed identity used when ``AUTH_PROVIDER`` is ``local`` or ``fake``,
     and ``anonymous`` for a caller let through by shadow mode.
     """
 

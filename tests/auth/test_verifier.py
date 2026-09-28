@@ -10,6 +10,7 @@ from cr_service.auth import (
     build_authenticator,
 )
 from cr_service.auth.testing import TokenFactory
+from cr_service.workos import STAGING
 from tests.conftest import make_settings
 
 
@@ -60,6 +61,15 @@ async def test_additional_client_ids_accepted(tokens):
     settings = make_settings(workos_additional_client_ids=("client_cli",))
     principal = await tokens.authenticator(settings).authenticate(tokens.user_token(client_id="client_cli"))
     assert principal.client_id == "client_cli"
+
+
+async def test_bookshelf_tokens(tokens):
+    bookshelf_token = tokens.user_token(client_id=STAGING.bookshelf_client_id)
+    with pytest.raises(AuthenticationError, match="different application"):
+        await tokens.authenticator(make_settings()).authenticate(bookshelf_token)
+    settings = make_settings(workos_accept_bookshelf_tokens=True)
+    principal = await tokens.authenticator(settings).authenticate(bookshelf_token)
+    assert principal.client_id == STAGING.bookshelf_client_id
 
 
 async def test_token_from_another_environment(settings, tokens):
@@ -179,9 +189,26 @@ async def test_local_provider():
     assert principal.permissions == {"things:read"}
 
 
+async def test_fake_provider():
+    settings = make_settings(
+        auth_provider="fake", auth_fake_token="let-me-in", auth_local_roles=("org-staff",)
+    )
+    authenticator = build_authenticator(settings)
+    principal = await authenticator.authenticate("let-me-in")
+    assert principal.kind == "local"
+    assert principal.roles == ("org-staff",)
+    with pytest.raises(AuthenticationError, match="fake token"):
+        await authenticator.authenticate("fake-access-token")
+    with pytest.raises(AuthenticationError) as missing:
+        await authenticator.authenticate(None)
+    assert missing.value.missing
+
+
 def test_workos_needs_client_id():
     with pytest.raises(AuthConfigurationError, match="WORKOS_CLIENT_ID"):
         build_authenticator(make_settings(workos_client_id=None))
+    with pytest.raises(AuthConfigurationError, match="WORKOS_CLIENT_ID"):
+        build_authenticator(make_settings(workos_client_id=None, workos_accept_bookshelf_tokens=True))
 
 
 def test_builds_jwks_caches():

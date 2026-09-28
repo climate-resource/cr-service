@@ -1,6 +1,7 @@
 """FastAPI dependencies that authenticate and authorise the caller."""
 
 import dataclasses
+import logging
 import typing
 from collections.abc import Awaitable, Callable, Sequence
 
@@ -13,6 +14,8 @@ from cr_service.auth.errors import AuthenticationError, AuthError, Authorization
 from cr_service.auth.hooks import FailureHook, SuccessHook, log_auth_failure, observe_principal
 from cr_service.auth.principal import ANONYMOUS, Principal
 from cr_service.settings import ServiceSettings
+
+logger = logging.getLogger(__name__)
 
 bearer_scheme = HTTPBearer(auto_error=False, scheme_name="WorkOS", description="WorkOS access token")
 
@@ -45,6 +48,11 @@ class _InstalledAuth:
 def install_auth(app: fastapi.FastAPI, settings: ServiceSettings, config: AuthConfig | None = None) -> None:
     """Make the auth dependencies work on ``app``. :func:`cr_service.setup` calls this."""
     config = config or AuthConfig()
+    if not settings.auth_enforce:
+        logger.warning(
+            "Auth is in shadow mode: failures are logged but not refused",
+            extra={"environment": settings.environment},
+        )
     app.state.cr_service_auth = _InstalledAuth(
         authenticator=config.authenticator or build_authenticator(settings),
         enforce=settings.auth_enforce,
