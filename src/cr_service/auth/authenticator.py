@@ -3,6 +3,7 @@
 import secrets
 import typing
 
+from cr_service.auth.api_keys import ApiKeyVerifier
 from cr_service.auth.errors import AuthConfigurationError, AuthenticationError, AuthorizationError
 from cr_service.auth.keys import JWKSCache, KeySource
 from cr_service.auth.principal import Principal
@@ -23,16 +24,18 @@ class Authenticator(typing.Protocol):
 
 
 class WorkOSAuthenticator:
-    """Verifies WorkOS access tokens, then applies the organisation and feature-flag gates."""
+    """Verifies WorkOS access tokens and API keys, then applies the organisation and feature-flag gates."""
 
     def __init__(
         self,
         verifier: TokenVerifier,
         *,
+        api_keys: ApiKeyVerifier | None = None,
         allowed_organization_ids: typing.Iterable[str] = (),
         required_feature_flag: str | None = None,
     ) -> None:
         self._verifier = verifier
+        self._api_keys = api_keys
         self._allowed_organization_ids = frozenset(allowed_organization_ids)
         self._required_feature_flag = required_feature_flag
 
@@ -40,7 +43,10 @@ class WorkOSAuthenticator:
         """Verify the token and check the caller against the gates."""
         if not token:
             raise AuthenticationError("Missing bearer token", missing=True)
-        principal = await self._verifier.verify(token)
+        if self._api_keys is not None and self._api_keys.recognises(token):
+            principal = await self._api_keys.verify(token)
+        else:
+            principal = await self._verifier.verify(token)
         if self._allowed_organization_ids and principal.organization_id not in self._allowed_organization_ids:
             raise AuthorizationError("Organisation is not allowed to use this service")
         # Feature flags are targeted at organisations a person belongs to, so machines are exempt.
@@ -95,10 +101,13 @@ def _local_principal(settings: ServiceSettings) -> Principal:
     )
 
 
-def build_authenticator(settings: ServiceSettings, *, keys: KeySource | None = None) -> Authenticator:
+def build_authenticator(
+    settings: ServiceSettings, *, keys: KeySource | None = None, api_keys: ApiKeyVerifier | None = None
+) -> Authenticator:
     """Build the authenticator the settings describe.
 
     ``keys`` replaces the JWKS fetched from WorkOS, which is how tests sign tokens.
+    ``api_keys`` replaces the API key verifier built when ``WORKOS_ACCEPT_API_KEYS`` is set.
     """
     if settings.auth_provider == "local":
         return LocalAuthenticator(_local_principal(settings))
@@ -133,8 +142,15 @@ def build_authenticator(settings: ServiceSettings, *, keys: KeySource | None = N
         machine_organizations=settings.workos_machine_client_organizations,
         require_email=settings.workos_require_email,
     )
+    if api_keys is None and settings.workos_accept_api_keys:
+        if settings.workos_api_key is None:
+            raise AuthConfigurationError("WORKOS_API_KEY must be set when WORKOS_ACCEPT_API_KEYS=true")
+        api_keys = ApiKeyVerifier(
+            settings.workos_api_key.get_secret_value(), require_email=settings.workos_require_email
+        )
     return WorkOSAuthenticator(
         verifier,
+        api_keys=api_keys,
         allowed_organization_ids=settings.workos_allowed_organization_ids,
         required_feature_flag=settings.workos_required_feature_flag,
     )

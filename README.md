@@ -94,8 +94,9 @@ Field names map straight to variable names.
 | `WORKOS_MACHINE_CLIENTS` | `{}` | JSON mapping machine client ids to the permissions each is granted. |
 | `WORKOS_MACHINE_CLIENT_ORGANIZATIONS` | `{}` | JSON mapping machine client ids to the organisations each may act for. |
 | `WORKOS_REQUIRE_EMAIL` | `false` | Refuse user tokens without an `email` claim. |
+| `WORKOS_ACCEPT_API_KEYS` | `false` | Accept WorkOS API keys as bearer tokens. Needs `WORKOS_API_KEY`. |
 | `WORKOS_ENVIRONMENT` | from `ENVIRONMENT` | `production` or `staging`, to override the mapping below. |
-| `WORKOS_API_KEY` | unset | Secret. Only needed for `WorkOSClient`. |
+| `WORKOS_API_KEY` | unset | Secret. Only needed for `WorkOSClient` and `WORKOS_ACCEPT_API_KEYS`. |
 
 Every variable except `WORKOS_API_KEY` is public,
 so it belongs in the deploy config rather than in chamber.
@@ -131,7 +132,8 @@ A verified token becomes a `Principal`:
 
 - `kind` is `user`, `machine`, `local` (from the `local` or `fake` provider),
   or `anonymous` for a caller let through by shadow mode.
-- `id` is the WorkOS user id, or the machine client id.
+- `id` is the WorkOS user id, the machine client id, or an organisation API key's id.
+- `credential` is `access_token` or `api_key`.
 - `organization_id`, `permissions`, `feature_flags`, `role` and `roles` come from the token.
 - `email`, `first_name`, `last_name` and `organization_name` come from the Climate Resource JWT template.
 - `claims` holds every verified claim.
@@ -145,6 +147,29 @@ Machine tokens are only accepted from client ids listed in `WORKOS_MACHINE_CLIEN
 and their permissions come from that list, never from the token.
 Every machine token must carry an `org_id`,
 and a client listed in `WORKOS_MACHINE_CLIENT_ORGANIZATIONS` must name one of its organisations.
+
+### API keys
+
+With `WORKOS_ACCEPT_API_KEYS=true`, a WorkOS API key works as a bearer token:
+
+```sh
+curl -H "Authorization: Bearer sk_..." https://my-service.example/v1/me
+```
+
+Keys are created and revoked in the accounts portal.
+Each key is validated with the WorkOS API, so this needs `WORKOS_API_KEY`.
+
+- A user's key acts as that user in the organisation it was created in, as a `user` principal.
+  Its email and name come from the user's WorkOS record.
+- An organisation's key is a `machine` principal of that organisation, with the key id as its `id`.
+- Either gets the permissions on the key and the organisation's feature flags, but no `role`.
+- `WORKOS_ALLOWED_ORGANIZATION_IDS` and `WORKOS_REQUIRED_FEATURE_FLAG` apply as they do to tokens.
+- `token_id` is the key id.
+
+An accepted key is cached for a minute, so a revoked key stops working within a minute.
+A refused key is never cached, so every unknown `sk_` bearer costs a WorkOS call.
+Put a rate limit in front of a service that accepts keys.
+When WorkOS cannot be reached the request gets a 503 rather than a 401.
 
 ### Bookshelf tokens
 
@@ -185,7 +210,8 @@ cr_service.setup(app, service=SERVICE, settings=settings, auth=AuthConfig(on_suc
 ```
 
 The callbacks run after the built-in ones.
-Those bind `user_id`, `organization_id`, `auth_kind` and `auth_client_id` to the log context,
+Those bind `user_id`, `organization_id`, `auth_kind`, `auth_client_id` and `auth_credential`
+to the log context,
 set the Sentry user id and `organization_id` tag, stamp `enduser.id` on the span,
 and log an `auth_failed` record with the reason for each refusal.
 Emails and names are never attached.
@@ -238,7 +264,7 @@ and anything else can read `cr_service.get_context()`.
 ## Other helpers
 
 - `cr_service.auth.workos_api.WorkOSClient` fetches users and organisations with `WORKOS_API_KEY`,
-  and pages through an organisation's members.
+  pages through an organisation's members and feature flags, and validates API keys.
 - `cr_service.tracing.instrument_sqlalchemy(engine)` adds a span per statement.
   It needs `opentelemetry-instrumentation-sqlalchemy` installed.
 - `cr_service.tracing.set_span_attributes(...)` and `current_trace_context()` work without the tracing extra.

@@ -96,6 +96,12 @@ class ServiceSettings(pydantic_settings.BaseSettings):
     workos_require_email: bool = False
     """Refuse user tokens without an ``email`` claim."""
 
+    workos_accept_api_keys: bool = False
+    """Accept WorkOS API keys owned by a user or an organisation as bearer tokens.
+
+    Each key is validated with the WorkOS API, so this needs ``WORKOS_API_KEY``.
+    """
+
     model_config = pydantic_settings.SettingsConfigDict(env_file=".env", extra="ignore", frozen=True)
 
     @pydantic.field_validator(
@@ -129,6 +135,8 @@ class ServiceSettings(pydantic_settings.BaseSettings):
                 raise ValueError("AUTH_ENFORCE=false needs AUTH_ALLOW_PRODUCTION_SHADOW=true in production")
             if self.workos.name != "production":
                 raise ValueError("Production must verify tokens from the production WorkOS environment")
+        if self.workos_accept_api_keys and self.workos_api_key is None:
+            raise ValueError("WORKOS_ACCEPT_API_KEYS=true needs WORKOS_API_KEY")
         if empty := [client for client, orgs in self.workos_machine_client_organizations.items() if not orgs]:
             raise ValueError(
                 f"WORKOS_MACHINE_CLIENT_ORGANIZATIONS gives no organisations for {', '.join(empty)}"

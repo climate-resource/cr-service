@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -41,6 +43,41 @@ async def test_list_users_follows_cursor_and_stops_on_repeat():
     async with client_with(handler) as client:
         users = [user["id"] async for user in client.list_users(organization_id="org_1")]
     assert users == ["u1", "u2", "u3"]
+
+
+async def test_validate_api_key():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        value = json.loads(request.content)["value"]
+        return httpx.Response(200, json={"api_key": {"id": "api_key_1"} if value == "sk_live" else None})
+
+    async with client_with(handler) as client:
+        assert await client.validate_api_key("sk_live") == {"id": "api_key_1"}
+        assert await client.validate_api_key("sk_unknown") is None
+    async with client_with(lambda request: httpx.Response(422)) as client:
+        assert await client.validate_api_key("junk") is None
+    async with client_with(lambda request: httpx.Response(401)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            await client.validate_api_key("sk_live")
+    assert requests[0].method == "POST"
+    assert requests[0].url.path == "/api_keys/validations"
+
+
+async def test_list_organization_feature_flags_follows_cursor():
+    pages = {
+        None: {"data": [{"slug": "a"}], "list_metadata": {"after": "f1"}},
+        "f1": {"data": [{"slug": "b"}], "list_metadata": {"after": None}},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/organizations/org_1/feature-flags"
+        return httpx.Response(200, json=pages[request.url.params.get("after")])
+
+    async with client_with(handler) as client:
+        flags = [flag["slug"] async for flag in client.list_organization_feature_flags("org_1")]
+    assert flags == ["a", "b"]
 
 
 async def test_errors_raise():

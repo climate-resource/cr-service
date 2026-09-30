@@ -15,7 +15,7 @@ JSONObject = dict[str, typing.Any]
 
 
 class WorkOSClient:
-    """Looks up users and organisations, authenticated with the management API key.
+    """Looks up users, organisations and API keys, authenticated with the management API key.
 
     Open it once per app, for example in the lifespan, and close it on shutdown.
     """
@@ -64,6 +64,20 @@ class WorkOSClient:
         response.raise_for_status()
         return typing.cast(JSONObject, response.json())
 
+    async def validate_api_key(self, value: str) -> JSONObject | None:
+        """Return the API key ``value`` belongs to, or ``None`` when it is unknown, expired or revoked."""
+        response = await self._client.post("/api_keys/validations", json={"value": value})
+        # A value WorkOS cannot parse is a bad key, not an outage.
+        if response.status_code in {400, 422}:
+            return None
+        response.raise_for_status()
+        api_key = typing.cast(JSONObject, response.json()).get("api_key")
+        if api_key is None:
+            return None
+        if not isinstance(api_key, dict):
+            raise TypeError("WorkOS returned a malformed API key")
+        return typing.cast(JSONObject, api_key)
+
     async def get_user(self, user_id: str) -> JSONObject:
         """Fetch one user."""
         return await self._get(f"/user_management/users/{user_id}")
@@ -77,11 +91,20 @@ class WorkOSClient:
         params = {"limit": "100"}
         if organization_id:
             params["organization_id"] = organization_id
+        async for user in self._paginate("/user_management/users", params):
+            yield user
+
+    async def list_organization_feature_flags(self, organization_id: str) -> AsyncIterator[JSONObject]:
+        """Yield every feature flag enabled for one organisation."""
+        async for flag in self._paginate(f"/organizations/{organization_id}/feature-flags", {"limit": "100"}):
+            yield flag
+
+    async def _paginate(self, path: str, params: dict[str, str]) -> AsyncIterator[JSONObject]:
         seen: set[str] = set()
         while True:
-            page = await self._get("/user_management/users", params)
-            for user in page.get("data", []):
-                yield user
+            page = await self._get(path, params)
+            for item in page.get("data", []):
+                yield item
             after = (page.get("list_metadata") or {}).get("after")
             if not after or after in seen:
                 return
