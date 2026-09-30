@@ -21,6 +21,13 @@ from the examples given in that link.
 
 <!-- towncrier release notes start -->
 
+## cr-service v0.4.0 (2026-09-30)
+
+### Features
+
+- Accepts WorkOS API keys owned by a user or an organisation as bearer tokens, behind `WORKOS_ACCEPT_API_KEYS`. ([#10](https://github.com/climate-resource/cr-service/pull/10))
+
+
 ## cr-service v0.3.1 (2026-09-28)
 
 ### Bug Fixes
