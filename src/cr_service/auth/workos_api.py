@@ -15,7 +15,7 @@ JSONObject = dict[str, typing.Any]
 
 
 class WorkOSClient:
-    """Looks up users, organisations and API keys, authenticated with the management API key.
+    """Calls the WorkOS management API, authenticated with the management API key.
 
     Open it once per app, for example in the lifespan, and close it on shutdown.
     """
@@ -98,6 +98,45 @@ class WorkOSClient:
         """Yield every feature flag enabled for one organisation."""
         async for flag in self._paginate(f"/organizations/{organization_id}/feature-flags", {"limit": "100"}):
             yield flag
+
+    async def list_organizations(self) -> AsyncIterator[JSONObject]:
+        """Yield every organisation."""
+        async for organization in self._paginate("/organizations", {"limit": "100"}):
+            yield organization
+
+    async def list_feature_flags(self) -> AsyncIterator[JSONObject]:
+        """Yield every feature flag, with its tags and its state in the key's environment."""
+        async for flag in self._paginate("/feature-flags", {"limit": "100"}):
+            yield flag
+
+    async def list_permissions(self) -> AsyncIterator[JSONObject]:
+        """Yield every permission in the key's environment, including the ones WorkOS manages."""
+        async for permission in self._paginate("/authorization/permissions", {"limit": "100"}):
+            yield permission
+
+    async def create_permission(
+        self,
+        slug: str,
+        *,
+        name: str,
+        description: str | None = None,
+        resource_type_slug: str = "organization",
+    ) -> JSONObject:
+        """Create a permission scoped to ``resource_type_slug``."""
+        body: JSONObject = {"slug": slug, "name": name, "resource_type_slug": resource_type_slug}
+        if description is not None:
+            body["description"] = description
+        response = await self._client.post("/authorization/permissions", json=body)
+        response.raise_for_status()
+        return typing.cast(JSONObject, response.json())
+
+    async def update_permission(self, slug: str, *, name: str, description: str | None) -> JSONObject:
+        """Replace a permission's name and description."""
+        response = await self._client.patch(
+            f"/authorization/permissions/{slug}", json={"name": name, "description": description}
+        )
+        response.raise_for_status()
+        return typing.cast(JSONObject, response.json())
 
     async def _paginate(self, path: str, params: dict[str, str]) -> AsyncIterator[JSONObject]:
         seen: set[str] = set()

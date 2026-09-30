@@ -24,6 +24,9 @@ dependencies = [
 ]
 dynamic = ["version"]
 
+[project.scripts]
+cr-service = "cr_service.cli:main"
+
 [project.optional-dependencies]
 profiling = ["pyroscope-io>=0.8.7"]
 tracing = [

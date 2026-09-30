@@ -274,3 +274,28 @@ def require_feature_flag(flag: str) -> Callable[..., Awaitable[Principal]]:
         return principal
 
     return check_feature_flag
+
+
+def require_entitlement(flag: str, *permissions: str) -> Callable[..., Awaitable[Principal]]:
+    """Build a dependency that answers 403 unless the caller has ``flag`` and every one of ``permissions``.
+
+    The flag says what the organisation may use and the permissions what this person may do there,
+    such as ``require_entitlement(BookshelfFlags.PUBLISH, BookshelfPermissions.WRITE)``.
+    Unlike the authenticator's required flag it applies to machines too:
+    an organisation API key carries its organisation's flags,
+    but a client-credentials token may carry none.
+    """
+
+    async def check_entitlement(request: fastapi.Request, principal: CurrentPrincipal) -> Principal:
+        has_permission = _installed(request).config.has_permission
+        missing = [] if principal.has_feature_flag(flag) else [f"feature flag {flag}"]
+        missing += [
+            f"permission {permission}"
+            for permission in sorted(permissions)
+            if not has_permission(principal, permission)
+        ]
+        if missing:
+            _refuse(request, AuthorizationError(f"Missing {', '.join(missing)}"))
+        return principal
+
+    return check_entitlement

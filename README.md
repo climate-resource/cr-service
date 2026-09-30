@@ -304,10 +304,88 @@ structlog users add `cr_service.logging_config.merge_request_context` to their p
 which masks secrets in the context it adds,
 and anything else can read `cr_service.get_context()`.
 
+## Feature flags and permissions
+
+Declare the flags and permissions a service checks in code,
+next to the routes that check them,
+so WorkOS can be compared with what the code relies on.
+
+```python
+from cr_service.flags import Flag, FlagKind, FlagSet
+from cr_service.permissions import Permission, PermissionSet
+
+
+class BookshelfFlags(FlagSet, owner="bookshelf"):
+    ACCESS = Flag("app:bookshelf", FlagKind.ENTITLEMENT, "Access Bookshelf")
+    PUBLISH = Flag("bookshelf:publish", FlagKind.ENTITLEMENT, "Publish to Bookshelf", requires=ACCESS)
+
+
+class BookshelfPermissions(PermissionSet, namespace="bookshelf"):
+    READ = Permission("bookshelf:read", "Read Bookshelf data")
+    WRITE = Permission("bookshelf:write", "Write Bookshelf data")
+```
+
+A `Flag` or `Permission` is a `str`, so it works anywhere a slug does:
+
+```python
+@app.post(
+    "/v1/books",
+    dependencies=[Depends(require_entitlement(BookshelfFlags.PUBLISH, BookshelfPermissions.WRITE))],
+)
+```
+
+`require_entitlement` answers 403 unless the organisation has the flag and the caller holds every permission.
+The flag says what the organisation may use,
+and the permissions say what this person may do there.
+
+Flag kinds:
+
+- `entitlement`: what an organisation may use, long-lived and targeted at organisations.
+  Product entry is `app:<product>` and each capability after that `<product>:<capability>`.
+- `release`: rolls out a change, deleted from the code and WorkOS once the rollout finishes.
+- `ops`: an operational switch.
+  A changed flag reaches people when their session refreshes, so this is not a fast kill switch.
+
+WorkOS flags carry two tags: the set's `owner` and `kind:<kind>`.
+The owner tag is how a check finds flags the code no longer declares.
+Permission slugs all start with the set's `namespace`, which does the same job.
+Roles, and which permissions they grant, stay in the infrastructure repository,
+because a role spans services and organisations.
+
+### The `cr-service` command
+
+Each command takes modules, or `module:Class` references, that declare the sets.
+`WORKOS_API_KEY` picks the WorkOS environment, so run each command once per environment.
+
+```sh
+cr-service flags list bookshelf_api.flags          # every WorkOS flag, and the status of each declared one
+cr-service flags check bookshelf_api.flags         # exits 1 if a declared flag is missing or mistagged
+cr-service flags check bookshelf_api.flags --targeting  # also finds organisations missing a required flag
+cr-service permissions list bookshelf_api.permissions
+cr-service permissions check bookshelf_api.permissions
+cr-service permissions sync bookshelf_api.permissions --dry-run
+```
+
+`--json` prints machine-readable output and `--strict` fails a check on warnings too.
+
+The WorkOS API cannot create a flag or change its tags,
+so `flags check` prints the name, description and tags to set in the dashboard instead.
+Flag definitions and tags are shared by a project's environments,
+but whether a flag is on and who it targets are not.
+
+`permissions sync` creates missing permissions and updates changed names and descriptions.
+It never deletes one, because that unbinds it from every role:
+a permission in the namespace that nothing declares is reported instead.
+
+The same checks are coroutines in `cr_service.reconcile`,
+such as `check_flags_remote(client, BookshelfFlags)`,
+for a service that wants to log drift at startup.
+
 ## Other helpers
 
 - `cr_service.auth.workos_api.WorkOSClient` fetches users and organisations with `WORKOS_API_KEY`,
   pages through an organisation's members and feature flags, and validates API keys.
+  It also lists feature flags, organisations and permissions, and creates and updates permissions.
 - `cr_service.tracing.instrument_sqlalchemy(engine)` adds a span per statement.
   It needs `opentelemetry-instrumentation-sqlalchemy` installed.
 - `cr_service.tracing.set_span_attributes(...)` and `current_trace_context()` work without the tracing extra.

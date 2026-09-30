@@ -12,6 +12,7 @@ from cr_service.auth import (
     Principal,
     base_authenticator,
     install_auth,
+    require_entitlement,
     require_feature_flag,
     require_permission,
     try_authenticate,
@@ -38,6 +39,12 @@ def add_routes(app: fastapi.FastAPI) -> fastapi.FastAPI:
         principal: typing.Annotated[Principal, fastapi.Depends(require_feature_flag("app:things"))],
     ) -> dict[str, str]:
         return {"id": principal.id}
+
+    @app.post(
+        "/publish", dependencies=[fastapi.Depends(require_entitlement("things:publish", "things:write"))]
+    )
+    def publish() -> dict[str, bool]:
+        return {"ok": True}
 
     return app
 
@@ -473,3 +480,19 @@ def test_wrapped_local_authenticator_is_skipped():
     response = TestClient(app).get("/me")
     assert response.json() == {"id": "user_local", "kind": "local"}
     assert response.headers["x-auth-status"] == "skipped"
+
+
+@pytest.mark.parametrize(
+    ("flags", "permissions", "detail"),
+    [
+        (["things:publish"], ["things:write"], None),
+        ([], ["things:write"], "Missing feature flag things:publish"),
+        (["things:publish"], [], "Missing permission things:write"),
+        ([], [], "Missing feature flag things:publish, permission things:write"),
+    ],
+)
+def test_require_entitlement(client, tokens, flags, permissions, detail):
+    response = client.post("/publish", headers=tokens.headers(feature_flags=flags, permissions=permissions))
+    assert response.status_code == (403 if detail else 200)
+    if detail:
+        assert response.json()["detail"] == detail
