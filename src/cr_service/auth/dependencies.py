@@ -21,6 +21,7 @@ bearer_scheme = HTTPBearer(auto_error=False, description="Access token")
 
 PermissionCheck = Callable[[Principal, str], bool]
 RequestCheck = Callable[[fastapi.Request, Principal], None]
+ResourceMetadataUrl = str | Callable[[fastapi.Request], str]
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -63,8 +64,11 @@ class AuthConfig:
     on_success: Sequence[SuccessHook] = ()
     on_failure: Sequence[FailureHook] = ()
 
-    resource_metadata_url: str | None = None
-    """Advertised on 401s, for clients that discover the authorisation server (RFC 9728)."""
+    resource_metadata_url: ResourceMetadataUrl | None = None
+    """Advertised on 401s, for clients that discover the authorisation server (RFC 9728).
+
+    A callable builds it from the request, for a service whose public origin depends on how it was reached.
+    """
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -119,11 +123,16 @@ async def _request_authenticator(request: fastapi.Request) -> Authenticator:
     return installed.authenticator
 
 
-def _http_error(installed: _InstalledAuth, error: AuthError) -> fastapi.HTTPException:
+def _http_error(
+    request: fastapi.Request, installed: _InstalledAuth, error: AuthError
+) -> fastapi.HTTPException:
     headers: dict[str, str] | None = None
     if isinstance(error, AuthenticationError):
         params = [] if error.missing else ['error="invalid_token"']
-        if url := installed.config.resource_metadata_url:
+        url = installed.config.resource_metadata_url
+        if callable(url):
+            url = url(request)
+        if url:
             params.append(f'resource_metadata="{url}"')
         headers = {"WWW-Authenticate": " ".join(["Bearer", ", ".join(params)]).strip()}
     return fastapi.HTTPException(status_code=error.status_code, detail=str(error), headers=headers)
@@ -151,7 +160,7 @@ def _refuse(request: fastapi.Request, error: AuthError) -> None:
     _record_failure(request, error)
     installed = _installed(request)
     if _enforced(installed, error):
-        raise _http_error(installed, error)
+        raise _http_error(request, installed, error)
 
 
 def _failed(request: fastapi.Request, error: AuthError, *, required: bool, refuse: bool) -> Principal | None:

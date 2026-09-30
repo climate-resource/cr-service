@@ -216,6 +216,7 @@ A missing permission or feature flag, a disallowed organisation and a failed req
   Raise `AuthorizationError` to refuse, for example a read-only credential on a `POST`.
   They run again whenever a dependency asks for the cached caller, so keep them free of side effects.
 - `resource_metadata_url` adds an RFC 9728 `resource_metadata` hint to 401 responses.
+  It is a URL, or a callable that builds one from the request.
 
 A service with its own logging and middleware can skip `setup` and call `install_auth(app, settings, config)`.
 It adds no middleware, so calling it again replaces the earlier installation.

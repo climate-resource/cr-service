@@ -129,6 +129,18 @@ def test_resource_metadata_hint(tokens):
     )
 
 
+def test_resource_metadata_hint_from_the_request(tokens):
+    def metadata_url(request: fastapi.Request) -> str:
+        return f"{request.base_url}.well-known/prm"
+
+    app = add_routes(build_app(make_settings(), tokens, auth=AuthConfig(resource_metadata_url=metadata_url)))
+    response = TestClient(app, base_url="https://reached.example").get("/me")
+    assert (
+        response.headers["www-authenticate"]
+        == 'Bearer resource_metadata="https://reached.example/.well-known/prm"'
+    )
+
+
 def test_shadow_mode_lets_unauthenticated_callers_through(tokens, caplog):
     settings = make_settings(environment="staging", auth_enforce=False)
     client = TestClient(add_routes(build_app(settings, tokens)))
