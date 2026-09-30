@@ -4,8 +4,8 @@ import dataclasses
 import typing
 from collections.abc import Mapping
 
-PrincipalKind = typing.Literal["user", "machine", "local", "anonymous"]
-Credential = typing.Literal["access_token", "api_key"]
+PrincipalKind = typing.Literal["user", "machine", "agent", "local", "anonymous"]
+Credential = typing.Literal["access_token", "api_key", "none"]
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -14,13 +14,14 @@ class Principal:
 
     ``kind`` is ``user`` for a person signed in through WorkOS,
     ``machine`` for a client-credentials application or an organisation's API key,
+    ``agent`` for software acting for a person, with the person as ``delegated_user_id``,
     ``local`` for the fixed identity used when ``AUTH_PROVIDER`` is ``local`` or ``fake``,
     and ``anonymous`` for a caller let through by shadow mode.
     """
 
     kind: PrincipalKind
     id: str
-    """WorkOS user id, the machine application's client id, or an organisation API key's id."""
+    """WorkOS user id, the machine application's client id, an organisation API key's id, or an agent's id."""
 
     organization_id: str | None = None
     permissions: frozenset[str] = frozenset()
@@ -36,7 +37,14 @@ class Principal:
     """Application the token was minted for."""
 
     credential: Credential = "access_token"
-    """What the caller authenticated with. An ``api_key`` caller has its key id as ``token_id``."""
+    """What the caller authenticated with.
+
+    An ``api_key`` caller has its key id as ``token_id``.
+    ``none`` means no credential was checked, which records the attempt as ``skipped``.
+    """
+
+    delegated_user_id: str | None = None
+    """For an ``agent``, the person it acts for, once one has approved it."""
 
     session_id: str | None = None
     token_id: str | None = None
@@ -63,4 +71,4 @@ class Principal:
         return flag in self.feature_flags
 
 
-ANONYMOUS = Principal(kind="anonymous", id="anonymous")
+ANONYMOUS = Principal(kind="anonymous", id="anonymous", credential="none")

@@ -6,13 +6,17 @@ from fastapi.testclient import TestClient
 
 from cr_service import AuthConfig, setup
 from cr_service.auth import (
+    AuthorizationError,
     CurrentPrincipal,
     OptionalPrincipal,
     Principal,
+    base_authenticator,
+    install_auth,
     require_feature_flag,
     require_permission,
     try_authenticate,
 )
+from cr_service.auth.authenticator import Authenticator, LocalAuthenticator
 from tests.conftest import SERVICE, build_app, make_settings
 
 
@@ -125,20 +129,54 @@ def test_resource_metadata_hint(tokens):
     )
 
 
-def test_shadow_mode_lets_failures_through(tokens, caplog):
+def test_resource_metadata_hint_from_the_request(tokens):
+    def metadata_url(request: fastapi.Request) -> str:
+        return f"{request.base_url}.well-known/prm"
+
+    app = add_routes(build_app(make_settings(), tokens, auth=AuthConfig(resource_metadata_url=metadata_url)))
+    response = TestClient(app, base_url="https://reached.example").get("/me")
+    assert (
+        response.headers["www-authenticate"]
+        == 'Bearer resource_metadata="https://reached.example/.well-known/prm"'
+    )
+
+
+def test_shadow_mode_lets_unauthenticated_callers_through(tokens, caplog):
     settings = make_settings(environment="staging", auth_enforce=False)
     client = TestClient(add_routes(build_app(settings, tokens)))
     assert any(record.msg.startswith("Auth is in shadow mode") for record in caplog.records)
     response = client.get("/me")
     assert response.json() == {"id": "anonymous", "kind": "anonymous"}
     assert response.headers["x-auth-status"] == "fail"
-    assert client.post("/things", headers=tokens.headers()).status_code == 200
+    assert client.get("/me", headers=tokens.headers("junk")).json()["kind"] == "anonymous"
     assert client.get("/maybe", headers=tokens.headers("junk")).json() == {"id": None}
     assert [record.auth_error for record in caplog.records if record.msg == "auth_failed"] == [
         "AuthenticationError",
-        "AuthorizationError",
+        "AuthenticationError",
         "AuthenticationError",
     ]
+
+
+def test_shadow_mode_still_refuses_unauthorised_callers(tokens, access_records):
+    settings = make_settings(environment="staging", auth_enforce=False)
+    client = TestClient(add_routes(build_app(settings, tokens)))
+    response = client.post("/things")
+    assert response.status_code == 403
+    assert response.headers["x-auth-status"] == "fail"
+    assert access_records()[-1].auth_outcome == "fail"
+    assert client.post("/things", headers=tokens.headers()).status_code == 403
+    assert client.post("/things", headers=tokens.headers(permissions=["things:write"])).status_code == 200
+    assert client.get("/flagged", headers=tokens.headers()).status_code == 403
+
+
+def test_shadow_mode_still_applies_the_organisation_gate(tokens):
+    settings = make_settings(
+        environment="staging", auth_enforce=False, workos_allowed_organization_ids=("org_allowed",)
+    )
+    client = TestClient(add_routes(build_app(settings, tokens)))
+    assert client.get("/me", headers=tokens.headers(organization_id="org_other")).status_code == 403
+    assert client.get("/maybe", headers=tokens.headers(organization_id="org_other")).status_code == 403
+    assert client.get("/me", headers=tokens.headers(organization_id="org_allowed")).status_code == 200
 
 
 def test_local_provider():
@@ -155,6 +193,7 @@ def test_fake_provider():
     client = TestClient(add_routes(build_app(settings)))
     headers = {"Authorization": "Bearer fake-access-token"}
     assert client.get("/me", headers=headers).json() == {"id": "user_local", "kind": "local"}
+    assert client.get("/me", headers=headers).headers["x-auth-status"] == "pass"
     assert client.post("/things", headers=headers).status_code == 200
     assert client.get("/me").status_code == 401
     assert client.get("/me", headers={"Authorization": "Bearer junk"}).status_code == 401
@@ -232,3 +271,205 @@ def test_token_factory_install(settings, tokens):
     app = add_routes(fastapi.FastAPI())
     tokens.install(app, settings)
     assert TestClient(app).get("/me", headers=tokens.headers()).status_code == 200
+
+
+def test_install_auth_without_setup(settings, tokens):
+    app = add_routes(fastapi.FastAPI())
+
+    @app.get("/outcome")
+    def outcome(request: fastapi.Request, principal: CurrentPrincipal) -> dict[str, str]:
+        return {"outcome": request.state.auth_outcome}
+
+    install_auth(app, settings, AuthConfig(authenticator=tokens.authenticator(settings)))
+    install_auth(app, settings, AuthConfig(authenticator=tokens.authenticator(settings)))
+    assert app.user_middleware == []
+    client = TestClient(app)
+    assert client.get("/me", headers=tokens.headers(user_id="user_1")).json()["id"] == "user_1"
+    assert client.get("/outcome", headers=tokens.headers()).json() == {"outcome": "pass"}
+    assert client.get("/me").status_code == 401
+
+
+class AgentAuthenticator:
+    """Recognises one opaque agent token, deferring anything else to the app's authenticator."""
+
+    def __init__(self, base: Authenticator, session: list[str], request: fastapi.Request) -> None:
+        self.base = base
+        self.session = session
+        self.request = request
+
+    async def authenticate(self, token: str | None) -> Principal:
+        if token == "agent-token":
+            self.session.append(f"query {self.request.method} {self.request.url.path}")
+            return Principal(kind="agent", id="agent_1", delegated_user_id="user_1", organization_id="org_1")
+        return await self.base.authenticate(token)
+
+
+@pytest.fixture
+def events() -> list[str]:
+    return []
+
+
+@pytest.fixture
+def dependency_app(settings, tokens, events):
+    async def agent_authenticator(
+        request: fastapi.Request, base: typing.Annotated[Authenticator, fastapi.Depends(base_authenticator)]
+    ) -> typing.AsyncIterator[Authenticator]:
+        session = events
+        session.append("open")
+        yield AgentAuthenticator(base, session, request)
+        session.append("close")
+
+    app = add_routes(
+        build_app(settings, tokens, auth=AuthConfig(authenticator_dependency=agent_authenticator))
+    )
+
+    @app.get("/both")
+    def both(first: CurrentPrincipal, second: OptionalPrincipal) -> dict[str, str | None]:
+        assert first is second
+        return {"kind": first.kind, "delegated": first.delegated_user_id}
+
+    return app
+
+
+def test_authenticator_dependency_per_request(dependency_app, tokens, events):
+    client = TestClient(dependency_app)
+    agent = {"Authorization": "Bearer agent-token"}
+    assert client.get("/both", headers=agent).json() == {"kind": "agent", "delegated": "user_1"}
+    assert events == ["open", "query GET /both", "close"]
+    assert client.get("/me", headers=tokens.headers(user_id="user_2")).json()["id"] == "user_2"
+    assert events[3:] == ["open", "close"]
+
+
+def test_agent_on_wide_event(dependency_app, access_records):
+    TestClient(dependency_app).get("/me", headers={"Authorization": "Bearer agent-token"})
+    event = access_records()[-1]
+    assert event.auth_kind == "agent"
+    assert event.user_id == "agent_1"
+    assert event.auth_delegated_user_id == "user_1"
+
+
+def test_authenticator_dependency_override_removed(dependency_app):
+    dependency_app.dependency_overrides.clear()
+    with pytest.raises(RuntimeError, match="authenticator_dependency"):
+        TestClient(dependency_app).get("/me")
+
+
+def test_install_auth_again_drops_the_dependency(dependency_app, settings, tokens):
+    install_auth(dependency_app, settings, AuthConfig(authenticator=tokens.authenticator(settings)))
+    assert dependency_app.dependency_overrides == {}
+    assert (
+        TestClient(dependency_app).get("/me", headers={"Authorization": "Bearer agent-token"}).status_code
+        == 401
+    )
+
+
+def test_try_authenticate_with_authenticator_dependency(dependency_app, settings, tokens):
+    @dependency_app.get("/graphql")
+    async def graphql(request: fastapi.Request) -> dict[str, str | None]:
+        principal = await try_authenticate(request, authenticator=tokens.authenticator(settings))
+        return {"id": principal.id if principal else None}
+
+    @dependency_app.get("/graphql-unwired")
+    async def unwired(request: fastapi.Request) -> None:
+        await try_authenticate(request)
+
+    client = TestClient(dependency_app)
+    assert client.get("/graphql", headers=tokens.headers(user_id="user_1")).json() == {"id": "user_1"}
+    with pytest.raises(RuntimeError, match="pass try_authenticate an authenticator"):
+        client.get("/graphql-unwired")
+
+
+def write_implies_read(principal: Principal, permission: str) -> bool:
+    return principal.has_permission(permission) or (
+        permission == "things:read" and principal.has_permission("things:write")
+    )
+
+
+def test_has_permission_policy(settings, tokens):
+    app = build_app(settings, tokens, auth=AuthConfig(has_permission=write_implies_read))
+
+    @app.get("/things", dependencies=[fastapi.Depends(require_permission("things:read"))])
+    def read() -> None: ...
+
+    client = TestClient(app)
+    assert client.get("/things", headers=tokens.headers(permissions=["things:write"])).status_code == 200
+    assert client.get("/things", headers=tokens.headers(permissions=["things:read"])).status_code == 200
+    assert client.get("/things", headers=tokens.headers(permissions=["other"])).status_code == 403
+
+
+def read_only_machines(request: fastapi.Request, principal: Principal) -> None:
+    if principal.kind == "machine" and request.method not in {"GET", "HEAD"}:
+        raise AuthorizationError("This credential can only read")
+
+
+@pytest.fixture
+def restricted_settings():
+    return make_settings(workos_machine_clients={"client_machine_test": ["things:write"]})
+
+
+@pytest.fixture
+def restricted_app(restricted_settings, tokens):
+    app = add_routes(
+        build_app(restricted_settings, tokens, auth=AuthConfig(request_checks=[read_only_machines]))
+    )
+
+    @app.post("/graphql")
+    async def graphql(request: fastapi.Request) -> dict[str, typing.Any]:
+        principal = await try_authenticate(request)
+        return {"id": principal.id if principal else None, "cached": hasattr(request.state, "principal")}
+
+    return app
+
+
+def test_request_checks(restricted_app, tokens):
+    client = TestClient(restricted_app)
+    machine = tokens.headers(tokens.machine_token())
+    assert client.get("/me", headers=machine).json()["kind"] == "machine"
+    response = client.post("/things", headers=machine)
+    assert response.status_code == 403
+    assert response.json() == {"detail": "This credential can only read"}
+    assert response.headers["x-auth-status"] == "fail"
+    assert client.post("/things", headers=tokens.headers(permissions=["things:write"])).status_code == 200
+
+
+def test_request_checks_in_shadow_mode(tokens):
+    settings = make_settings(
+        environment="staging",
+        auth_enforce=False,
+        workos_machine_clients={"client_machine_test": ["things:write"]},
+    )
+    app = add_routes(build_app(settings, tokens, auth=AuthConfig(request_checks=[read_only_machines])))
+    assert TestClient(app).post("/things", headers=tokens.headers(tokens.machine_token())).status_code == 403
+
+
+def test_refused_caller_is_not_cached(restricted_app, tokens):
+    response = TestClient(restricted_app).post("/graphql", headers=tokens.headers(tokens.machine_token()))
+    assert response.json() == {"id": None, "cached": False}
+
+
+def test_request_checks_apply_to_a_cached_principal(restricted_app, tokens):
+    @restricted_app.middleware("http")
+    async def preset(request: fastapi.Request, call_next):
+        request.state.principal = Principal(kind="machine", id="client_machine_test")
+        return await call_next(request)
+
+    client = TestClient(restricted_app)
+    assert client.get("/me").json() == {"id": "client_machine_test", "kind": "machine"}
+    assert client.post("/things").json() == {"detail": "This credential can only read"}
+
+
+class WrappingAuthenticator:
+    def __init__(self, inner: Authenticator) -> None:
+        self.inner = inner
+
+    async def authenticate(self, token: str | None) -> Principal:
+        return await self.inner.authenticate(token)
+
+
+def test_wrapped_local_authenticator_is_skipped():
+    settings = make_settings(auth_provider="local")
+    local = LocalAuthenticator(Principal(kind="local", id="user_local"))
+    app = add_routes(build_app(settings, auth=AuthConfig(authenticator=WrappingAuthenticator(local))))
+    response = TestClient(app).get("/me")
+    assert response.json() == {"id": "user_local", "kind": "local"}
+    assert response.headers["x-auth-status"] == "skipped"

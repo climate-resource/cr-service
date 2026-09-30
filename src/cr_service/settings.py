@@ -47,7 +47,9 @@ class ServiceSettings(pydantic_settings.BaseSettings):
     """
 
     auth_enforce: bool = True
-    """``false`` is shadow mode: failures are logged but let through as anonymous.
+    """``false`` is shadow mode: authentication failures are logged and let through as anonymous.
+
+    Authorisation failures, such as a missing permission, are still refused.
 
     Refused in production unless ``AUTH_ALLOW_PRODUCTION_SHADOW`` is set.
     """

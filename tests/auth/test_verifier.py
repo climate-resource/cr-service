@@ -10,6 +10,7 @@ from cr_service.auth import (
     build_authenticator,
 )
 from cr_service.auth.testing import TokenFactory
+from cr_service.auth.verifier import TokenVerifier, TrustProfile
 from cr_service.workos import STAGING
 from tests.conftest import make_settings
 
@@ -251,3 +252,12 @@ def test_builds_jwks_caches():
         "https://auth-api.climateresource.com.au/sso/jwks/client_01KABZE0E62YS9H7BMV6YZGMD1",
         "https://balanced-universe-28-staging.authkit.app/oauth2/jwks",
     }
+
+
+def test_duplicate_issuers_are_refused(tokens):
+    profiles = [
+        TrustProfile(kind="user", issuer="https://issuer", keys=tokens.keys, audience=None),
+        TrustProfile(kind="machine", issuer="https://issuer", keys=tokens.keys, audience="aud"),
+    ]
+    with pytest.raises(AuthConfigurationError, match="https://issuer"):
+        TokenVerifier(profiles, accepted_client_ids=())
