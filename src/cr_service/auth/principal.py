@@ -5,6 +5,7 @@ import typing
 from collections.abc import Mapping
 
 PrincipalKind = typing.Literal["user", "machine", "local", "anonymous"]
+Credential = typing.Literal["access_token", "api_key"]
 
 
 @dataclasses.dataclass(frozen=True, slots=True, kw_only=True)
@@ -12,14 +13,14 @@ class Principal:
     """Who is calling, and what they may do.
 
     ``kind`` is ``user`` for a person signed in through WorkOS,
-    ``machine`` for a client-credentials application,
+    ``machine`` for a client-credentials application or an organisation's API key,
     ``local`` for the fixed identity used when ``AUTH_PROVIDER`` is ``local`` or ``fake``,
     and ``anonymous`` for a caller let through by shadow mode.
     """
 
     kind: PrincipalKind
     id: str
-    """WorkOS user id, or the machine application's client id."""
+    """WorkOS user id, the machine application's client id, or an organisation API key's id."""
 
     organization_id: str | None = None
     permissions: frozenset[str] = frozenset()
@@ -33,6 +34,9 @@ class Principal:
     organization_name: str | None = None
     client_id: str | None = None
     """Application the token was minted for."""
+
+    credential: Credential = "access_token"
+    """What the caller authenticated with. An ``api_key`` caller has its key id as ``token_id``."""
 
     session_id: str | None = None
     token_id: str | None = None

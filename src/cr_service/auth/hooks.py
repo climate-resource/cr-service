@@ -24,6 +24,7 @@ def observe_principal(request: fastapi.Request, principal: Principal) -> None:
         organization_id=principal.organization_id,
         auth_kind=principal.kind,
         auth_client_id=principal.client_id,
+        auth_credential=principal.credential,
     )
     sentry_sdk.set_user({"id": principal.id})
     if principal.organization_id:

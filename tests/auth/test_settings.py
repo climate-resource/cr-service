@@ -73,6 +73,12 @@ def test_machine_client_organizations_need_known_clients():
         )
 
 
+def test_accepting_api_keys_needs_the_management_key():
+    with pytest.raises(pydantic.ValidationError, match="WORKOS_ACCEPT_API_KEYS"):
+        make_settings(workos_accept_api_keys=True)
+    assert make_settings(workos_accept_api_keys=True, workos_api_key="sk_test").workos_accept_api_keys
+
+
 def test_api_key_is_secret(monkeypatch):
     monkeypatch.setenv("WORKOS_API_KEY", "sk_test_123")
     settings = make_settings()
