@@ -6,7 +6,7 @@ from collections.abc import Mapping
 
 import jwt
 
-from cr_service.auth.errors import AuthenticationError
+from cr_service.auth.errors import AuthConfigurationError, AuthenticationError
 from cr_service.auth.keys import KeySource
 from cr_service.auth.principal import Principal
 
@@ -54,7 +54,8 @@ class TokenVerifier:
     Parameters
     ----------
     profiles
-        Accepted token kinds. At most one per issuer.
+        Accepted token kinds.
+        Two profiles with the same issuer raise :class:`AuthConfigurationError`.
     accepted_client_ids
         Applications whose user tokens are accepted, when the token names one.
     machine_clients
@@ -76,7 +77,11 @@ class TokenVerifier:
         machine_organizations: Mapping[str, typing.Iterable[str]] | None = None,
         require_email: bool = False,
     ) -> None:
-        self._profiles = {profile.issuer: profile for profile in profiles}
+        self._profiles: dict[str, TrustProfile] = {}
+        for profile in profiles:
+            if profile.issuer in self._profiles:
+                raise AuthConfigurationError(f"More than one trust profile has the issuer {profile.issuer!r}")
+            self._profiles[profile.issuer] = profile
         self._accepted_client_ids = frozenset(accepted_client_ids)
         self._machine_clients = {
             client_id: frozenset(permissions) for client_id, permissions in (machine_clients or {}).items()

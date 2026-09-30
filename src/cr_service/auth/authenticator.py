@@ -1,5 +1,6 @@
 """Turning a bearer token into a :class:`Principal`."""
 
+import dataclasses
 import secrets
 import typing
 
@@ -62,10 +63,14 @@ class WorkOSAuthenticator:
 
 
 class LocalAuthenticator:
-    """Lets every request through as one fixed identity, for local development."""
+    """Lets every request through as one fixed identity, for local development.
+
+    The identity's ``credential`` is ``none``,
+    so a service that wraps this authenticator still records the attempt as ``skipped``.
+    """
 
     def __init__(self, principal: Principal) -> None:
-        self.principal = principal
+        self.principal = dataclasses.replace(principal, credential="none")
 
     async def authenticate(self, token: str | None) -> Principal:
         """Return the fixed identity, whatever the token."""

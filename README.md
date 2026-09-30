@@ -81,7 +81,7 @@ Field names map straight to variable names.
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | |
 | `SENTRY_RELEASE` | `<service>@<version>` | The deploy sets it to the revision. |
 | `AUTH_PROVIDER` | `workos` | `local` lets every request in as a fixed identity. `fake` does so only for `AUTH_FAKE_TOKEN`. Both need `ENVIRONMENT=local`. |
-| `AUTH_ENFORCE` | `true` | `false` is shadow mode: refusals are logged, not enforced. |
+| `AUTH_ENFORCE` | `true` | `false` is shadow mode: authentication failures are logged, not enforced. Authorisation is still enforced. |
 | `AUTH_ALLOW_PRODUCTION_SHADOW` | `false` | Allows `AUTH_ENFORCE=false` in production, which is otherwise refused. |
 | `AUTH_LOCAL_PERMISSIONS` | empty | Permissions of the local identity, comma separated. |
 | `AUTH_LOCAL_ROLES` | empty | Roles of the local identity, comma separated. |
@@ -130,10 +130,12 @@ Guard on permissions, never on role names.
 
 A verified token becomes a `Principal`:
 
-- `kind` is `user`, `machine`, `local` (from the `local` or `fake` provider),
+- `kind` is `user`, `machine`, `agent`, `local` (from the `local` or `fake` provider),
   or `anonymous` for a caller let through by shadow mode.
-- `id` is the WorkOS user id, the machine client id, or an organisation API key's id.
-- `credential` is `access_token` or `api_key`.
+  Only a service's own authenticator produces `agent`.
+- `id` is the WorkOS user id, the machine client id, an organisation API key's id, or an agent's id.
+- `delegated_user_id` is the person an `agent` acts for.
+- `credential` is `access_token`, `api_key`, or `none` when nothing was checked, as for `AUTH_PROVIDER=local`.
 - `organization_id`, `permissions`, `feature_flags`, `role` and `roles` come from the token.
 - `email`, `first_name`, `last_name` and `organization_name` come from the Climate Resource JWT template.
 - `claims` holds every verified claim.
@@ -188,15 +190,55 @@ An unknown key id triggers one early refetch, at most once a minute.
 When a refetch fails the stale keys keep serving,
 and with no keys at all the request gets a 503 rather than a 401.
 
+### Shadow mode
+
+With `AUTH_ENFORCE=false` a caller whose credentials are missing, invalid or cannot be checked
+continues as the `anonymous` principal, and the failure is logged as `shadow_fail`.
+Authorisation is still enforced.
+A missing permission or feature flag, a disallowed organisation and a failed request check all answer 403.
+
 ### Extending auth
 
 `setup` takes an `AuthConfig`, whose fields are all optional:
 
 - `on_success` and `on_failure` are callbacks run after each attempt, for example to write an audit log.
+  They observe and never decide access.
 - `authenticator` replaces the one built from the settings,
   so a service with its own token types, such as Bookshelf's agent tokens,
   can wrap `build_authenticator(settings)`.
+- `authenticator_dependency` is a FastAPI dependency that returns or yields the authenticator for one request.
+  It can take the request and request-scoped resources such as a database session,
+  and depend on `base_authenticator` to wrap the app's authenticator.
+- `has_permission(principal, permission)` decides what `require_permission` accepts,
+  for a service where one permission implies another.
+- `request_checks` run as `check(request, principal)` on every authenticated caller,
+  before a dependency returns it.
+  Raise `AuthorizationError` to refuse, for example a read-only credential on a `POST`.
+  They run again whenever a dependency asks for the cached caller, so keep them free of side effects.
 - `resource_metadata_url` adds an RFC 9728 `resource_metadata` hint to 401 responses.
+
+A service with its own logging and middleware can skip `setup` and call `install_auth(app, settings, config)`.
+It adds no middleware, so calling it again replaces the earlier installation.
+
+```python
+from cr_service.auth import AuthConfig, Authenticator, base_authenticator, install_auth
+
+
+async def request_authenticator(
+    request: fastapi.Request,
+    base: Annotated[Authenticator, Depends(base_authenticator)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> Authenticator:
+    return AgentTokenAuthenticator(base, session, request)
+
+
+install_auth(app, settings, AuthConfig(authenticator_dependency=request_authenticator))
+```
+
+With `authenticator_dependency` set,
+`try_authenticate` needs the request's authenticator passed as `authenticator=`.
+An authenticator that wraps `LocalAuthenticator` keeps its principal's `credential` of `none`,
+so the attempt is still recorded as `skipped`.
 
 ```python
 from cr_service import AuthConfig
@@ -211,13 +253,13 @@ cr_service.setup(app, service=SERVICE, settings=settings, auth=AuthConfig(on_suc
 
 The callbacks run after the built-in ones.
 Those bind `user_id`, `organization_id`, `auth_kind`, `auth_client_id` and `auth_credential`
-to the log context,
+to the log context, with `auth_delegated_user_id` for an agent,
 set the Sentry user id and `organization_id` tag, stamp `enduser.id` on the span,
 and log an `auth_failed` record with the reason for each refusal.
 Emails and names are never attached.
 
-Each attempt also binds `auth_outcome`,
-which is `pass`, `fail`, `shadow_fail` or `skipped` for `AUTH_PROVIDER=local`.
+Each attempt also binds `auth_outcome` and sets it on `request.state.auth_outcome`.
+It is `pass`, `fail`, `shadow_fail`, or `skipped` for a principal whose `credential` is `none`.
 Responses carry it as the `x-auth-status` header, with `shadow_fail` reported as `fail`.
 A service with its own auth gets the header by binding `auth_outcome` itself.
 A route that never checks auth, or an optional one called without a token, gets no header.
