@@ -21,6 +21,27 @@ from the examples given in that link.
 
 <!-- towncrier release notes start -->
 
+## cr-service v0.5.0 (2026-09-30)
+
+### Breaking Changes
+
+- Enforces authorisation in shadow mode.
+  With `AUTH_ENFORCE=false` only authentication failures let the caller through as anonymous.
+  A missing permission or feature flag, a disallowed organisation or a failed request check now answers 403.
+  Refuses trust profiles that share an issuer with `AuthConfigurationError`. ([#11](https://github.com/climate-resource/cr-service/pull/11))
+
+### Features
+
+- Exports `install_auth`, which installs auth without the rest of `setup`.
+  Adds `AuthConfig.authenticator_dependency`, a FastAPI dependency that builds the authenticator for each request and can wrap `base_authenticator`.
+  Adds `AuthConfig.has_permission`, which decides what `require_permission` accepts.
+  Adds `AuthConfig.request_checks`, which can refuse any authenticated request and run again whenever the cached caller is reused.
+  Adds the `agent` principal kind and `Principal.delegated_user_id`.
+  Adds the `none` credential, which records an attempt as `skipped` even when a service wraps `LocalAuthenticator`.
+  Sets `request.state.auth_outcome`.
+  Allows `AuthConfig.resource_metadata_url` to be a callable that builds the URL from the request. ([#11](https://github.com/climate-resource/cr-service/pull/11))
+
+
 ## cr-service v0.4.0 (2026-09-30)
 
 ### Features
