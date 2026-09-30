@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from cr_service.auth import AuthConfig, AuthenticationError, AuthUnavailableError, CurrentPrincipal, Principal
 from cr_service.auth.api_keys import ApiKeyVerifier
-from cr_service.auth.authenticator import build_authenticator
+from cr_service.auth.authenticator import build_authenticator, clear_auth_caches
 from cr_service.auth.dependencies import install_auth
 from tests.conftest import build_app, make_settings
 
@@ -175,6 +175,23 @@ async def test_require_email():
 
 def test_build_authenticator_with_api_keys():
     assert build_authenticator(make_settings(workos_accept_api_keys=True, workos_api_key="sk_test"))
+
+
+def test_api_key_verifier_is_shared_per_key():
+    settings = make_settings(workos_accept_api_keys=True, workos_api_key="sk_one")
+    first = build_authenticator(settings)._api_keys
+    assert first is not None
+    assert build_authenticator(settings)._api_keys is first
+    rotated = build_authenticator(make_settings(workos_accept_api_keys=True, workos_api_key="sk_two"))
+    assert rotated._api_keys is not first
+    clear_auth_caches()
+    assert build_authenticator(settings)._api_keys is not first
+
+
+def test_api_keys_override_the_shared_verifier():
+    override = ApiKeyVerifier("sk_override")
+    settings = make_settings(workos_accept_api_keys=True, workos_api_key="sk_one")
+    assert build_authenticator(settings, api_keys=override)._api_keys is override
 
 
 def api_key_client(workos: FakeWorkOS, **settings: typing.Any) -> TestClient:

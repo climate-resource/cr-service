@@ -1,6 +1,7 @@
 """Turning a bearer token into a :class:`Principal`."""
 
 import dataclasses
+import hashlib
 import secrets
 import typing
 
@@ -10,6 +11,32 @@ from cr_service.auth.keys import JWKSCache, KeySource
 from cr_service.auth.principal import Principal
 from cr_service.auth.verifier import TokenVerifier, TrustProfile
 from cr_service.settings import ServiceSettings
+
+# Shared by every authenticator built in the process, because an app may be built more than once.
+_jwks_caches: dict[str, JWKSCache] = {}
+# Keyed by a fingerprint of the management key, so the key itself is only held by its verifier.
+_api_key_verifiers: dict[tuple[str, bool], ApiKeyVerifier] = {}
+
+
+def _jwks_cache(url: str) -> JWKSCache:
+    cache = _jwks_caches.get(url)
+    if cache is None:
+        cache = _jwks_caches[url] = JWKSCache(url)
+    return cache
+
+
+def _api_key_verifier(workos_api_key: str, *, require_email: bool) -> ApiKeyVerifier:
+    slot = (hashlib.sha256(workos_api_key.encode()).hexdigest(), require_email)
+    verifier = _api_key_verifiers.get(slot)
+    if verifier is None:
+        verifier = _api_key_verifiers[slot] = ApiKeyVerifier(workos_api_key, require_email=require_email)
+    return verifier
+
+
+def clear_auth_caches() -> None:
+    """Drop the JWKS caches and API key verifiers that :func:`build_authenticator` shares, for tests."""
+    _jwks_caches.clear()
+    _api_key_verifiers.clear()
 
 
 class Authenticator(typing.Protocol):
@@ -111,6 +138,7 @@ def build_authenticator(
 ) -> Authenticator:
     """Build the authenticator the settings describe.
 
+    The JWKS caches and the API key verifier are shared across calls for the life of the process.
     ``keys`` replaces the JWKS fetched from WorkOS, which is how tests sign tokens.
     ``api_keys`` replaces the API key verifier built when ``WORKOS_ACCEPT_API_KEYS`` is set.
     """
@@ -127,7 +155,7 @@ def build_authenticator(
         TrustProfile(
             kind="user",
             issuer=workos.user_token_issuer,
-            keys=keys or JWKSCache(workos.user_jwks_url),
+            keys=keys or _jwks_cache(workos.user_jwks_url),
             audience=None,
         )
     ]
@@ -136,7 +164,7 @@ def build_authenticator(
             TrustProfile(
                 kind="machine",
                 issuer=workos.machine_token_issuer,
-                keys=keys or JWKSCache(workos.machine_jwks_url),
+                keys=keys or _jwks_cache(workos.machine_jwks_url),
                 audience=workos.machine_token_audience,
             )
         )
@@ -150,7 +178,7 @@ def build_authenticator(
     if api_keys is None and settings.workos_accept_api_keys:
         if settings.workos_api_key is None:
             raise AuthConfigurationError("WORKOS_API_KEY must be set when WORKOS_ACCEPT_API_KEYS=true")
-        api_keys = ApiKeyVerifier(
+        api_keys = _api_key_verifier(
             settings.workos_api_key.get_secret_value(), require_email=settings.workos_require_email
         )
     return WorkOSAuthenticator(

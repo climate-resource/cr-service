@@ -206,6 +206,9 @@ A missing permission or feature flag, a disallowed organisation and a failed req
 - `authenticator` replaces the one built from the settings,
   so a service with its own token types, such as Bookshelf's agent tokens,
   can wrap `build_authenticator(settings)`.
+  Every `build_authenticator` call in a process shares one JWKS cache per JWKS URL
+  and one API key verifier per `WORKOS_API_KEY`,
+  so building an app more than once does not refetch keys or drop cached API keys.
 - `authenticator_dependency` is a FastAPI dependency that returns or yields the authenticator for one request.
   It can take the request and request-scoped resources such as a database session,
   and depend on `base_authenticator` to wrap the app's authenticator.
@@ -341,6 +344,7 @@ def test_create_thing(client, tokens):
 `tokens.install` swaps in a verifier that trusts the factory's key, keeping the app's `AuthConfig` callbacks.
 `tokens.user_token(...)` and `tokens.machine_token(...)` sign tokens shaped like the real ones,
 and `tokens.sign(claims)` signs anything, for malformed-token tests.
+Call `cr_service.auth.clear_auth_caches()` between tests that need a fresh JWKS cache or API key verifier.
 
 ## Migrating a templated service
 

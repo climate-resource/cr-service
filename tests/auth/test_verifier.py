@@ -8,6 +8,7 @@ from cr_service.auth import (
     AuthenticationError,
     AuthorizationError,
     build_authenticator,
+    clear_auth_caches,
 )
 from cr_service.auth.testing import TokenFactory
 from cr_service.auth.verifier import TokenVerifier, TrustProfile
@@ -252,6 +253,31 @@ def test_builds_jwks_caches():
         "https://auth-api.climateresource.com.au/sso/jwks/client_01KABZE0E62YS9H7BMV6YZGMD1",
         "https://balanced-universe-28-staging.authkit.app/oauth2/jwks",
     }
+
+
+def _jwks_caches(authenticator):
+    return {profile.kind: profile.keys for profile in authenticator._verifier._profiles.values()}
+
+
+def test_jwks_caches_are_shared_across_builds():
+    settings = make_settings(workos_machine_clients={"client_m2m": []})
+    first = _jwks_caches(build_authenticator(settings))
+    second = _jwks_caches(build_authenticator(settings))
+    assert first["user"] is second["user"]
+    assert first["machine"] is second["machine"]
+    assert first["user"] is not first["machine"]
+
+
+def test_clear_auth_caches_drops_jwks_caches():
+    first = _jwks_caches(build_authenticator(make_settings()))
+    clear_auth_caches()
+    second = _jwks_caches(build_authenticator(make_settings()))
+    assert first["user"] is not second["user"]
+
+
+def test_keys_override_the_shared_caches(tokens):
+    settings = make_settings(workos_machine_clients={"client_m2m": []})
+    assert set(_jwks_caches(build_authenticator(settings, keys=tokens.keys)).values()) == {tokens.keys}
 
 
 def test_duplicate_issuers_are_refused(tokens):
