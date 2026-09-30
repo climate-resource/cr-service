@@ -319,17 +319,15 @@ def dependency_app(settings, tokens, events):
         yield AgentAuthenticator(base, session, request)
         session.append("close")
 
-    app = add_routes(fastapi.FastAPI())
+    app = add_routes(
+        build_app(settings, tokens, auth=AuthConfig(authenticator_dependency=agent_authenticator))
+    )
 
     @app.get("/both")
     def both(first: CurrentPrincipal, second: OptionalPrincipal) -> dict[str, str | None]:
         assert first is second
         return {"kind": first.kind, "delegated": first.delegated_user_id}
 
-    setup(
-        app, service=SERVICE, settings=settings, auth=AuthConfig(authenticator_dependency=agent_authenticator)
-    )
-    tokens.install(app, settings)
     return app
 
 
@@ -377,7 +375,7 @@ def test_try_authenticate_with_authenticator_dependency(dependency_app, settings
 
     client = TestClient(dependency_app)
     assert client.get("/graphql", headers=tokens.headers(user_id="user_1")).json() == {"id": "user_1"}
-    with pytest.raises(RuntimeError, match="needs an authenticator"):
+    with pytest.raises(RuntimeError, match="pass try_authenticate an authenticator"):
         client.get("/graphql-unwired")
 
 

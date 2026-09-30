@@ -47,7 +47,7 @@ class AuthConfig:
     and depend on request-scoped resources such as a database session, which FastAPI cleans up.
     """
 
-    has_permission: PermissionCheck | None = None
+    has_permission: PermissionCheck = Principal.has_permission
     """Decides whether a caller holds a permission for :func:`require_permission`.
 
     Defaults to :meth:`Principal.has_permission`.
@@ -115,12 +115,18 @@ async def base_authenticator(request: fastapi.Request) -> Authenticator:
     return _installed(request).authenticator
 
 
+def _default_authenticator(installed: _InstalledAuth) -> Authenticator:
+    if installed.config.authenticator_dependency is not None:
+        raise RuntimeError(
+            "The app authenticator is not used when authenticator_dependency is set, "
+            "check app.dependency_overrides or pass try_authenticate an authenticator"
+        )
+    return installed.authenticator
+
+
 async def _request_authenticator(request: fastapi.Request) -> Authenticator:
     # install_auth overrides this with AuthConfig.authenticator_dependency.
-    installed = _installed(request)
-    if installed.config.authenticator_dependency is not None:
-        raise RuntimeError("The auth authenticator_dependency is missing from app.dependency_overrides")
-    return installed.authenticator
+    return _default_authenticator(_installed(request))
 
 
 def _http_error(
@@ -138,39 +144,26 @@ def _http_error(
     return fastapi.HTTPException(status_code=error.status_code, detail=str(error), headers=headers)
 
 
-def _enforced(installed: _InstalledAuth, error: AuthError) -> bool:
-    # Shadow mode only lets unauthenticated callers through, never unauthorised ones.
-    return installed.enforce or isinstance(error, AuthorizationError)
-
-
 def _record_outcome(request: fastapi.Request, outcome: str) -> None:
     context.bind(auth_outcome=outcome)
     request.state.auth_outcome = outcome
 
 
-def _record_failure(request: fastapi.Request, error: AuthError) -> None:
-    installed = _installed(request)
-    _record_outcome(request, "fail" if _enforced(installed, error) else "shadow_fail")
+def _record_failure(request: fastapi.Request, installed: _InstalledAuth, error: AuthError) -> bool:
+    """Run the failure hooks and return whether the failure is enforced."""
+    # Shadow mode only lets unauthenticated callers through, never unauthorised ones.
+    enforced = installed.enforce or isinstance(error, AuthorizationError)
+    _record_outcome(request, "fail" if enforced else "shadow_fail")
     for hook in (log_auth_failure, *installed.config.on_failure):
         hook(request, error)
+    return enforced
 
 
 def _refuse(request: fastapi.Request, error: AuthError) -> None:
     """Run the failure hooks, then raise unless shadow mode lets an authentication failure through."""
-    _record_failure(request, error)
     installed = _installed(request)
-    if _enforced(installed, error):
+    if _record_failure(request, installed, error):
         raise _http_error(request, installed, error)
-
-
-def _failed(request: fastapi.Request, error: AuthError, *, required: bool, refuse: bool) -> Principal | None:
-    if not required and isinstance(error, AuthenticationError) and error.missing:
-        return None
-    if not refuse:
-        _record_failure(request, error)
-        return None
-    _refuse(request, error)
-    return ANONYMOUS if required else None
 
 
 async def _authenticate(
@@ -193,7 +186,13 @@ async def _authenticate(
         for check in installed.config.request_checks:
             check(request, principal)
     except AuthError as error:
-        return _failed(request, error, required=required, refuse=refuse)
+        if not required and isinstance(error, AuthenticationError) and error.missing:
+            return None
+        if not refuse:
+            _record_failure(request, installed, error)
+            return None
+        _refuse(request, error)
+        return ANONYMOUS if required else None
 
     if principal is cached:
         return principal
@@ -236,11 +235,8 @@ async def try_authenticate(
     Failures, including a JWKS outage, still run the failure hooks and set ``x-auth-status``.
     With an ``authenticator_dependency`` configured, pass the request's ``authenticator``.
     """
-    installed = _installed(request)
     if authenticator is None:
-        if installed.config.authenticator_dependency is not None:
-            raise RuntimeError("try_authenticate needs an authenticator when authenticator_dependency is set")
-        authenticator = installed.authenticator
+        authenticator = _default_authenticator(_installed(request))
     credentials = await bearer_scheme(request)
     return await _authenticate(request, authenticator, credentials, required=False, refuse=False)
 
@@ -258,7 +254,7 @@ def require_permission(*permissions: str) -> Callable[..., Awaitable[Principal]]
     """
 
     async def check_permissions(request: fastapi.Request, principal: CurrentPrincipal) -> Principal:
-        has_permission = _installed(request).config.has_permission or Principal.has_permission
+        has_permission = _installed(request).config.has_permission
         missing = sorted(
             permission for permission in permissions if not has_permission(principal, permission)
         )
