@@ -1,0 +1,16 @@
+[flags."app:things"]
+name = "Access Things"
+description = "Use Things at all"
+owner = "things"
+kind = "entitlement"
+
+[flags."things:publish"]
+name = "Publish Things"
+owner = "things"
+kind = "entitlement"
+requires = ["app:things"]
+
+[flags."release:things-view"]
+name = "New view"
+owner = "things"
+kind = "release"

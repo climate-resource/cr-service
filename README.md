@@ -306,26 +306,27 @@ and anything else can read `cr_service.get_context()`.
 
 ## Feature flags and permissions
 
-Declare the flags and permissions a service checks in code,
-next to the routes that check them,
-so WorkOS can be compared with what the code relies on.
+The infrastructure repository is the source of truth for WorkOS flags and permissions.
+A service declares only the ones it relies on,
+and cr-service warns when WorkOS does not match.
+Nothing here writes to WorkOS.
 
 ```python
 from cr_service.flags import Flag, FlagKind, FlagSet
-from cr_service.permissions import Permission, PermissionSet
+from cr_service.permissions import PermissionSet
 
 
-class BookshelfFlags(FlagSet, owner="bookshelf"):
-    ACCESS = Flag("app:bookshelf", FlagKind.ENTITLEMENT, "Access Bookshelf")
-    PUBLISH = Flag("bookshelf:publish", FlagKind.ENTITLEMENT, "Publish to Bookshelf", requires=ACCESS)
+class BookshelfFlags(FlagSet):
+    ACCESS = Flag("app:bookshelf", FlagKind.ENTITLEMENT)
+    PUBLISH = Flag("bookshelf:publish", FlagKind.ENTITLEMENT, requires=ACCESS)
 
 
-class BookshelfPermissions(PermissionSet, namespace="bookshelf"):
-    READ = Permission("bookshelf:read", "Read Bookshelf data")
-    WRITE = Permission("bookshelf:write", "Write Bookshelf data")
+class BookshelfPermissions(PermissionSet):
+    READ = "bookshelf:read"
+    WRITE = "bookshelf:write"
 ```
 
-A `Flag` or `Permission` is a `str`, so it works anywhere a slug does:
+A `Flag` is a `str`, and permissions stay plain strings, so both work anywhere a slug does:
 
 ```python
 @app.post(
@@ -338,7 +339,7 @@ A `Flag` or `Permission` is a `str`, so it works anywhere a slug does:
 The flag says what the organisation may use,
 and the permissions say what this person may do there.
 
-Flag kinds:
+Flag kinds, recorded in WorkOS as a `kind:<kind>` tag:
 
 - `entitlement`: what an organisation may use, long-lived and targeted at organisations.
   Product entry is `app:<product>` and each capability after that `<product>:<capability>`.
@@ -346,46 +347,58 @@ Flag kinds:
 - `ops`: an operational switch.
   A changed flag reaches people when their session refreshes, so this is not a fast kill switch.
 
-WorkOS flags carry two tags: the set's `owner` and `kind:<kind>`.
-The owner tag is how a check finds flags the code no longer declares.
-Permission slugs all start with the set's `namespace`, which does the same job.
-Roles, and which permissions they grant, stay in the infrastructure repository,
-because a role spans services and organisations.
+### Warning at startup
+
+```python
+from cr_service.auth.workos_api import WorkOSClient
+from cr_service.reconcile import warn_on_drift
+
+async with WorkOSClient.from_settings(settings) as workos:
+    await warn_on_drift(workos, flags=[BookshelfFlags], permissions=[BookshelfPermissions])
+```
+
+It logs a warning for each declared flag WorkOS lacks or tags with another kind,
+and each permission WorkOS lacks.
+It never raises, so an unreachable WorkOS does not stop the service.
+
+### The flag registry
+
+WorkOS cannot be configured from code, since its API cannot create flags or set their tags,
+so the infrastructure repository keeps a registry, one TOML table per flag:
+
+```toml
+[flags."bookshelf:publish"]
+name = "Publish to Bookshelf"
+description = "Organisation may publish books"
+owner = "bookshelf"
+kind = "entitlement"
+requires = ["app:bookshelf"]
+```
+
+A registered flag carries two WorkOS tags: its `owner` and `kind:<kind>`.
+Other tags are left alone.
 
 ### The `cr-service` command
 
-Each command takes modules, or `module:Class` references, that declare the sets.
-`WORKOS_API_KEY` picks the WorkOS environment, so run each command once per environment.
+Every command only reads WorkOS.
+`WORKOS_API_KEY` picks the environment, so run each command once per environment.
 
 ```sh
-cr-service flags list bookshelf_api.flags          # every WorkOS flag, and the status of each declared one
-cr-service flags check bookshelf_api.flags         # exits 1 if a declared flag is missing or mistagged
-cr-service flags check bookshelf_api.flags --targeting  # also finds organisations missing a required flag
-cr-service permissions list bookshelf_api.permissions
-cr-service permissions check bookshelf_api.permissions
-cr-service permissions sync bookshelf_api.permissions --dry-run
+cr-service flags list --registry workos-flags.toml        # every WorkOS flag with its status
+cr-service flags check --registry workos-flags.toml       # what to change in the dashboard
+cr-service flags check bookshelf_api.auth --targeting     # also finds organisations missing a required flag
+cr-service permissions list bookshelf_api.auth
+cr-service permissions check bookshelf_api.auth
 ```
 
+Commands take modules, or `module:Class` references, that declare the sets.
 `--json` prints machine-readable output and `--strict` fails a check on warnings too.
-
-The WorkOS API cannot create a flag or change its tags,
-so `flags check` prints the name, description and tags to set in the dashboard instead.
-Flag definitions and tags are shared by a project's environments,
-but whether a flag is on and who it targets are not.
-
-`permissions sync` creates missing permissions and updates changed names and descriptions.
-It never deletes one, because that unbinds it from every role:
-a permission in the namespace that nothing declares is reported instead.
-
-The same checks are coroutines in `cr_service.reconcile`,
-such as `check_flags_remote(client, BookshelfFlags)`,
-for a service that wants to log drift at startup.
 
 ## Other helpers
 
 - `cr_service.auth.workos_api.WorkOSClient` fetches users and organisations with `WORKOS_API_KEY`,
   pages through an organisation's members and feature flags, and validates API keys.
-  It also lists feature flags, organisations and permissions, and creates and updates permissions.
+  It also lists feature flags, organisations and permissions.
 - `cr_service.tracing.instrument_sqlalchemy(engine)` adds a span per statement.
   It needs `opentelemetry-instrumentation-sqlalchemy` installed.
 - `cr_service.tracing.set_span_attributes(...)` and `current_trace_context()` work without the tracing extra.

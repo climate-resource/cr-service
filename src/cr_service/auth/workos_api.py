@@ -114,30 +114,6 @@ class WorkOSClient:
         async for permission in self._paginate("/authorization/permissions", {"limit": "100"}):
             yield permission
 
-    async def create_permission(
-        self,
-        slug: str,
-        *,
-        name: str,
-        description: str | None = None,
-        resource_type_slug: str = "organization",
-    ) -> JSONObject:
-        """Create a permission scoped to ``resource_type_slug``."""
-        body: JSONObject = {"slug": slug, "name": name, "resource_type_slug": resource_type_slug}
-        if description is not None:
-            body["description"] = description
-        response = await self._client.post("/authorization/permissions", json=body)
-        response.raise_for_status()
-        return typing.cast(JSONObject, response.json())
-
-    async def update_permission(self, slug: str, *, name: str, description: str | None) -> JSONObject:
-        """Replace a permission's name and description."""
-        response = await self._client.patch(
-            f"/authorization/permissions/{slug}", json={"name": name, "description": description}
-        )
-        response.raise_for_status()
-        return typing.cast(JSONObject, response.json())
-
     async def _paginate(self, path: str, params: dict[str, str]) -> AsyncIterator[JSONObject]:
         seen: set[str] = set()
         while True:

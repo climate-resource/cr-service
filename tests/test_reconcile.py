@@ -1,19 +1,25 @@
+import logging
+
 import httpx
 
 from cr_service.auth.workos_api import WorkOSClient
 from cr_service.flags import Flag, FlagKind, FlagSet
-from cr_service.permissions import Permission, PermissionSet
 from cr_service.reconcile import (
     check_flag_targeting,
     check_flag_targeting_remote,
     check_flags,
     check_flags_remote,
-    check_permissions_remote,
+    check_permissions,
+    check_registry,
+    check_registry_remote,
     list_flags,
-    plan_permissions,
-    sync_permissions,
+    requirements_of,
+    warn_on_drift,
 )
 from tests.declarations_example import ThingsFlags, ThingsPermissions
+from tests.test_registry import EXAMPLE, load_registry
+
+REGISTRY = load_registry(EXAMPLE)
 
 
 def remote_flag(slug, *tags, name=None, description=None, enabled=True):
@@ -21,9 +27,17 @@ def remote_flag(slug, *tags, name=None, description=None, enabled=True):
 
 
 IN_SYNC = [
-    remote_flag("app:things", "things", "kind:entitlement", name="Access Things", description="Shows Things"),
+    remote_flag(
+        "app:things", "things", "kind:entitlement", name="Access Things", description="Use Things at all"
+    ),
     remote_flag("things:publish", "things", "kind:entitlement", name="Publish Things"),
     remote_flag("release:things-view", "things", "kind:release", name="New view", enabled=False),
+]
+
+PERMISSIONS = [
+    {"slug": "things:read", "name": "Read things", "system": False},
+    {"slug": "other:read", "name": "Other", "system": False},
+    {"slug": "widgets:api-keys:manage", "name": "Widgets", "system": True},
 ]
 
 
@@ -31,67 +45,75 @@ def codes(findings):
     return sorted((finding.code, finding.slug) for finding in findings)
 
 
-def test_flags_in_sync_have_no_findings():
+def test_declared_flags_in_sync():
     assert check_flags([ThingsFlags], IN_SYNC) == []
 
 
-def test_extra_tags_other_than_kinds_are_allowed():
-    remote = [dict(IN_SYNC[0], tags=["things", "kind:entitlement", "app"]), *IN_SYNC[1:]]
-    assert check_flags([ThingsFlags], remote) == []
-
-
-def test_missing_flag_says_how_to_create_it():
-    [finding] = check_flags([ThingsFlags], IN_SYNC[1:])
-    assert (finding.level, finding.code, finding.slug) == ("error", "missing", "app:things")
-    assert finding.fix == (
-        "Create it in the WorkOS dashboard with slug 'app:things'; name 'Access Things'; "
-        "description 'Shows Things'; tags kind:entitlement, things"
-    )
-
-
-def test_wrong_tags():
+def test_declared_flag_missing_or_wrong_kind():
     remote = [
-        remote_flag("app:things", "kind:release", name="Access Things", description="Shows Things"),
-        *IN_SYNC[1:],
+        remote_flag("app:things", "things"),
+        remote_flag("things:publish", "kind:release", "kind:entitlement"),
     ]
-    [finding] = check_flags([ThingsFlags], remote)
-    assert (finding.code, finding.slug) == ("tags", "app:things")
-    assert finding.fix == "In the dashboard, add kind:entitlement, things; remove kind:release"
+    findings = check_flags([ThingsFlags], remote)
+    assert codes(findings) == [
+        ("kind", "app:things"),
+        ("kind", "things:publish"),
+        ("missing", "release:things-view"),
+    ]
+    assert findings[0].message == "the code expects kind:entitlement but WorkOS has no kind tag"
 
 
-def test_changed_name_is_a_warning():
-    remote = [dict(IN_SYNC[0], name="Old name"), *IN_SYNC[1:]]
-    [finding] = check_flags([ThingsFlags], remote)
-    assert (finding.level, finding.code) == ("warning", "details")
+def test_required_flag_missing():
+    class Needy(FlagSet):
+        EXTRA = Flag("needy:extra", FlagKind.OPS, requires=Flag("needy:base", FlagKind.OPS))
+
+    assert codes(check_flags([Needy], [remote_flag("needy:extra", "kind:ops")])) == [
+        ("requires", "needy:extra")
+    ]
 
 
-def test_undeclared_flag_with_owner_tag():
-    remote = [*IN_SYNC, remote_flag("things:old", "things", "kind:release"), remote_flag("other", "other")]
-    [finding] = check_flags([ThingsFlags], remote)
-    assert (finding.level, finding.code, finding.slug) == ("warning", "undeclared", "things:old")
-
-
-def test_required_flag_outside_the_sets():
-    access = Flag("app:elsewhere", FlagKind.ENTITLEMENT, "Elsewhere")
-
-    class Needy(FlagSet, owner="needy"):
-        EXTRA = Flag("needy:extra", FlagKind.ENTITLEMENT, "Extra", requires=access)
-
-    remote = [remote_flag("needy:extra", "needy", "kind:entitlement", name="Extra")]
-    assert codes(check_flags([Needy], remote)) == [("requires", "needy:extra")]
-    assert check_flags([Needy], [*remote, remote_flag("app:elsewhere")]) == []
-
-
-def test_same_slug_with_two_owners_conflicts():
-    class Other(FlagSet, owner="other"):
-        ACCESS = Flag("app:things", FlagKind.ENTITLEMENT, "Access Things", "Shows Things")
+def test_conflicting_declarations():
+    class Other(FlagSet):
+        ACCESS = Flag("app:things", FlagKind.RELEASE)
 
     assert ("conflict", "app:things") in codes(check_flags([ThingsFlags, Other], IN_SYNC))
 
 
-def test_targeting_reports_organisations_missing_the_required_flag():
+def test_permissions():
+    assert codes(check_permissions([ThingsPermissions], PERMISSIONS)) == [("missing", "things:write")]
+
+
+def test_registry_in_sync_allows_extra_tags():
+    remote = [dict(IN_SYNC[0], tags=["things", "kind:entitlement", "app"]), *IN_SYNC[1:]]
+    assert check_registry(REGISTRY, remote) == []
+
+
+def test_registry_differences():
+    remote = [
+        remote_flag("app:things", "kind:release", name="Access Things", description="Use Things at all"),
+        dict(IN_SYNC[1], name="Old name"),
+        remote_flag("stray"),
+    ]
+    findings = {finding.slug: finding for finding in check_registry(REGISTRY, remote)}
+    assert findings["app:things"].fix == "In the dashboard, add kind:entitlement, things; remove kind:release"
+    assert findings["things:publish"].code == "details"
+    assert findings["release:things-view"].fix == (
+        "Create it in the WorkOS dashboard with slug 'release:things-view'; name 'New view'; "
+        "tags kind:release, things"
+    )
+    assert (findings["stray"].level, findings["stray"].code) == ("warning", "unregistered")
+
+
+def test_requirements_and_targeting():
+    class Extra(FlagSet):
+        BETA = Flag("things:beta", FlagKind.RELEASE, requires=ThingsFlags.PUBLISH)
+
+    assert requirements_of([ThingsFlags, Extra], REGISTRY) == {
+        "things:publish": ("app:things",),
+        "things:beta": ("things:publish",),
+    }
     served = {"org_ok": ["app:things", "things:publish"], "org_bad": ["things:publish"], "org_none": []}
-    [finding] = check_flag_targeting([ThingsFlags], served, {"org_bad": "Bad Org"})
+    [finding] = check_flag_targeting({"things:publish": ["app:things"]}, served, {"org_bad": "Bad Org"})
     assert (finding.code, finding.slug) == ("targeting", "things:publish")
     assert "Bad Org (org_bad)" in finding.message
 
@@ -100,72 +122,39 @@ def test_list_flags_statuses():
     remote = [
         dict(IN_SYNC[0], tags=["kind:entitlement"]),
         IN_SYNC[2],
-        remote_flag("things:old", "things", "kind:ops"),
-        remote_flag("unowned"),
+        remote_flag("legacy", "kind:ops"),
     ]
-    rows = {row.slug: row for row in list_flags([ThingsFlags], remote)}
+    rows = {row.slug: row for row in list_flags(remote, [ThingsFlags], REGISTRY)}
     assert {slug: row.status for slug, row in rows.items()} == {
         "app:things": "drift",
         "release:things-view": "ok",
-        "things:old": "undeclared",
-        "unowned": "-",
+        "legacy": "unregistered",
         "things:publish": "missing",
     }
-    assert rows["things:old"].kind == "ops"
-    assert rows["things:old"].owner is None
-    assert rows["things:publish"].enabled is None
+    assert (rows["legacy"].kind, rows["legacy"].owner) == ("ops", None)
+    assert (rows["things:publish"].owner, rows["things:publish"].enabled) == ("things", None)
     assert rows["release:things-view"].enabled is False
 
-
-REMOTE_PERMISSIONS = [
-    {"slug": "things:read", "name": "Read things", "description": None, "system": False},
-    {"slug": "things:write", "name": "Old", "description": None, "system": False},
-    {"slug": "things:legacy", "name": "Legacy", "description": None, "system": False},
-    {"slug": "other:read", "name": "Other", "description": None, "system": False},
-    {"slug": "widgets:api-keys:manage", "name": "Widgets", "description": None, "system": True},
-]
-
-
-def test_plan_permissions():
-    changes, findings = plan_permissions([ThingsPermissions], REMOTE_PERMISSIONS)
-    assert [(change.action, change.permission.slug) for change in changes] == [("update", "things:write")]
-    assert codes(findings) == [("undeclared", "things:legacy")]
-
-    changes, findings = plan_permissions([ThingsPermissions], [])
-    assert [(change.action, change.permission.slug) for change in changes] == [
-        ("create", "things:read"),
-        ("create", "things:write"),
-    ]
-    assert findings == []
-
-
-def test_plan_permissions_refuses_system_and_conflicting_declarations():
-    class Widgets(PermissionSet, namespace="widgets"):
-        MANAGE = Permission("widgets:api-keys:manage", "Widgets")
-
-    class Again(PermissionSet, namespace="things"):
-        READ = Permission("things:read", "Another name")
-
-    _changes, findings = plan_permissions([Widgets, ThingsPermissions, Again], REMOTE_PERMISSIONS)
-    assert ("system", "widgets:api-keys:manage") in codes(findings)
-    assert ("conflict", "things:read") in codes(findings)
+    rows = {row.slug: row for row in list_flags(remote, [ThingsFlags])}
+    assert rows["legacy"].status == "-"
+    assert rows["things:publish"].owner is None
 
 
 class FakeWorkOS:
-    """Serves the list endpoints from memory and records writes."""
+    """Serves the list endpoints from memory and refuses writes."""
 
-    def __init__(self, flags=(), permissions=(), organizations=(), served=None):
+    def __init__(self, flags=(), permissions=(), organizations=(), served=None, status=200):
         self.flags = list(flags)
         self.permissions = list(permissions)
         self.organizations = list(organizations)
         self.served = served or {}
-        self.writes: list[tuple[str, str, bytes]] = []
+        self.status = status
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET", "cr-service must only read WorkOS"
+        if self.status != 200:
+            return httpx.Response(self.status, text="nope")
         path = request.url.path
-        if request.method != "GET":
-            self.writes.append((request.method, path, request.content))
-            return httpx.Response(200, json={})
         if path == "/feature-flags":
             data = self.flags
         elif path == "/authorization/permissions":
@@ -183,48 +172,29 @@ class FakeWorkOS:
 
 
 async def test_remote_checks():
-    fake = FakeWorkOS(
-        flags=IN_SYNC,
-        permissions=REMOTE_PERMISSIONS,
-        organizations=[{"id": "org_1", "name": "One"}],
-        served={"org_1": ["things:publish"]},
-    )
+    fake = FakeWorkOS(flags=IN_SYNC, organizations=[{"id": "org_1"}], served={"org_1": ["things:publish"]})
     async with fake.client() as client:
         assert await check_flags_remote(client, ThingsFlags) == []
-        assert codes(await check_flag_targeting_remote(client, ThingsFlags)) == [
-            ("targeting", "things:publish")
-        ]
-        assert codes(await check_permissions_remote(client, ThingsPermissions)) == [
-            ("outdated", "things:write"),
-            ("undeclared", "things:legacy"),
-        ]
+        assert await check_registry_remote(client, REGISTRY) == []
+        [finding] = await check_flag_targeting_remote(client, requirements_of([ThingsFlags]))
+        assert "org_1 (org_1)" in finding.message
+        assert await check_flag_targeting_remote(client, {}) == []
 
 
-async def test_targeting_skips_sets_without_requirements():
-    class Plain(FlagSet, owner="plain"):
-        A = Flag("plain:a", FlagKind.OPS, "A")
+async def test_warn_on_drift_logs_each_finding(caplog):
+    fake = FakeWorkOS(flags=IN_SYNC[:2], permissions=PERMISSIONS)
+    with caplog.at_level(logging.WARNING, logger="cr_service.reconcile"):
+        async with fake.client() as client:
+            findings = await warn_on_drift(client, flags=[ThingsFlags], permissions=[ThingsPermissions])
+    assert codes(findings) == [("missing", "release:things-view"), ("missing", "things:write")]
+    assert [record.workos_slug for record in caplog.records] == ["release:things-view", "things:write"]
+    assert caplog.records[0].workos_drift == "missing"
 
-    fake = FakeWorkOS()
-    async with fake.client() as client:
-        assert await check_flag_targeting_remote(client, Plain) == []
 
-
-async def test_sync_permissions_creates_and_updates():
-    fake = FakeWorkOS(permissions=REMOTE_PERMISSIONS[1:2])
-    async with fake.client() as client:
-        changes, _ = await sync_permissions(client, ThingsPermissions, dry_run=True)
-        assert len(changes) == 2
-        assert fake.writes == []
-        await sync_permissions(client, ThingsPermissions)
-    assert fake.writes == [
-        (
-            "POST",
-            "/authorization/permissions",
-            b'{"slug":"things:read","name":"Read things","resource_type_slug":"organization"}',
-        ),
-        (
-            "PATCH",
-            "/authorization/permissions/things:write",
-            b'{"name":"Write things","description":"Create and edit things"}',
-        ),
-    ]
+async def test_warn_on_drift_never_raises(caplog):
+    with caplog.at_level(logging.WARNING, logger="cr_service.reconcile"):
+        async with FakeWorkOS(status=500).client() as client:
+            assert await warn_on_drift(client, flags=[ThingsFlags]) == []
+        async with FakeWorkOS().client() as client:
+            assert await warn_on_drift(client) == []
+    assert caplog.records[0].getMessage() == "Could not compare flags and permissions with WorkOS"

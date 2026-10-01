@@ -1,10 +1,11 @@
-"""``cr-service``: check declared feature flags and permissions against WorkOS.
+"""``cr-service``: compare declared flags and permissions, and the flag registry, with WorkOS.
 
-Each command takes the modules or ``module:Class`` references that declare a service's sets::
+Every command only reads WorkOS.
+Commands take the modules or ``module:Class`` references that declare a service's sets::
 
-    cr-service flags list bookshelf_api.flags
-    cr-service flags check bookshelf_api.flags --targeting
-    cr-service permissions sync bookshelf_api.permissions --dry-run
+    cr-service flags check bookshelf_api.auth
+    cr-service flags check --registry live/_envcommon/workos-flags.toml --targeting
+    cr-service permissions check bookshelf_api.auth
 
 A bare module means every set defined in it.
 ``WORKOS_API_KEY`` picks the WorkOS environment, so run each command once per environment.
@@ -28,15 +29,18 @@ from cr_service.permissions import PermissionSet
 from cr_service.reconcile import (
     Finding,
     check_flag_targeting_remote,
-    check_flags_remote,
+    check_flags,
     check_permissions_remote,
+    check_registry,
+    fetch_flags,
     list_flags,
-    sync_permissions,
+    requirements_of,
 )
+from cr_service.registry import RegisteredFlag, load_registry
 
 
 class UsageError(Exception):
-    """A reference or setting the command cannot use."""
+    """A reference, file or setting the command cannot use."""
 
 
 def load_sets[T: (FlagSet, PermissionSet)](references: Sequence[str], base: type[T]) -> list[type[T]]:
@@ -68,6 +72,15 @@ def load_sets[T: (FlagSet, PermissionSet)](references: Sequence[str], base: type
                 raise UsageError(f"{module_name!r} defines no {base.__name__}")
         found.extend(candidate for candidate in candidates if candidate not in found)
     return found
+
+
+def _registry(path: str | None) -> tuple[RegisteredFlag, ...]:
+    if path is None:
+        return ()
+    try:
+        return load_registry(path)
+    except (OSError, ValueError) as error:
+        raise UsageError(f"Cannot read the registry {path}: {error}") from error
 
 
 def _client() -> WorkOSClient:
@@ -104,9 +117,10 @@ def _table(rows: Sequence[Sequence[str]]) -> str:
 
 async def _flags_list(args: argparse.Namespace) -> int:
     flag_sets = load_sets(args.sets, FlagSet)
+    registry = _registry(args.registry)
     async with _client() as client:
-        remote = [flag async for flag in client.list_feature_flags()]
-    rows = list_flags(flag_sets, remote)
+        remote = await fetch_flags(client)
+    rows = list_flags(remote, flag_sets, registry)
     if args.owner:
         rows = [row for row in rows if row.owner == args.owner or args.owner in row.tags]
     if args.json:
@@ -132,40 +146,36 @@ async def _flags_list(args: argparse.Namespace) -> int:
 
 
 async def _flags_check(args: argparse.Namespace) -> int:
+    if not args.sets and not args.registry:
+        raise UsageError("Name the modules declaring flag sets, or pass --registry")
     flag_sets = load_sets(args.sets, FlagSet)
+    registry = _registry(args.registry)
     async with _client() as client:
-        findings = await check_flags_remote(client, *flag_sets)
+        remote = await fetch_flags(client)
+        findings = check_flags(flag_sets, remote)
+        if registry:
+            findings += check_registry(registry, remote)
         if args.targeting:
-            findings += await check_flag_targeting_remote(client, *flag_sets)
+            findings += await check_flag_targeting_remote(client, requirements_of(flag_sets, registry))
     _print_findings(findings, as_json=args.json)
     return _exit_code(findings, strict=args.strict)
 
 
 async def _permissions_list(args: argparse.Namespace) -> int:
     permission_sets = load_sets(args.sets, PermissionSet)
-    declared = {permission.slug: permission for s in permission_sets for permission in s.permissions()}
-    namespaces = {permission_set.namespace for permission_set in permission_sets}
+    declared = {slug for permission_set in permission_sets for slug in permission_set.permissions()}
     async with _client() as client:
         remote = {permission["slug"]: permission async for permission in client.list_permissions()}
-    slugs = sorted(
-        set(declared) | {slug for slug in remote if not namespaces or slug.split(":", 1)[0] in namespaces}
-    )
     rows = []
-    for slug in slugs:
+    for slug in sorted(declared | set(remote)):
         current = remote.get(slug)
         if current is None:
             status = "missing"
-        elif slug not in declared:
-            status = "system" if current.get("system") else ("undeclared" if namespaces else "-")
-        elif (current.get("name"), current.get("description") or None) != (
-            declared[slug].name,
-            declared[slug].description,
-        ):
-            status = "outdated"
-        else:
+        elif slug in declared:
             status = "ok"
-        name = declared[slug].name if slug in declared else (current or {}).get("name", "")
-        rows.append({"slug": slug, "status": status, "name": name})
+        else:
+            status = "system" if current.get("system") else "-"
+        rows.append({"slug": slug, "status": status, "name": (current or {}).get("name") or ""})
     if args.json:
         print(json.dumps(rows, indent=2))
     elif rows:
@@ -183,55 +193,34 @@ async def _permissions_check(args: argparse.Namespace) -> int:
     return _exit_code(findings, strict=args.strict)
 
 
-async def _permissions_sync(args: argparse.Namespace) -> int:
-    permission_sets = load_sets(args.sets, PermissionSet)
-    async with _client() as client:
-        changes, findings = await sync_permissions(client, *permission_sets, dry_run=args.dry_run)
-    if args.json:
-        print(
-            json.dumps(
-                {
-                    "dry_run": args.dry_run,
-                    "changes": [{"action": c.action, "slug": c.permission.slug} for c in changes],
-                    "findings": [dataclasses.asdict(finding) for finding in findings],
-                },
-                indent=2,
-            )
-        )
-        return _exit_code(findings, strict=False)
-    for change in changes:
-        verb = f"Would {change.action}" if args.dry_run else f"{change.action.capitalize()}d"
-        print(f"{verb} {change.permission.slug} ({change.permission.name})")
-    if not changes:
-        print("Permissions are up to date.")
-    if findings:
-        _print_findings(findings, as_json=False)
-    return _exit_code(findings, strict=False)
-
-
 def build_parser() -> argparse.ArgumentParser:
     """Build the ``cr-service`` argument parser."""
     parser = argparse.ArgumentParser(
-        prog="cr-service", description="Check declared feature flags and permissions against WorkOS."
+        prog="cr-service",
+        description="Compare declared flags and permissions, and the flag registry, with WorkOS. Read-only.",
     )
     commands = parser.add_subparsers(dest="group", required=True)
 
-    def sets_argument(command: argparse.ArgumentParser, *, required: bool = True) -> None:
+    def common(command: argparse.ArgumentParser, *, sets_required: bool) -> None:
         command.add_argument(
             "sets",
-            nargs="+" if required else "*",
+            nargs="+" if sets_required else "*",
             metavar="MODULE[:CLASS]",
             help="module declaring the sets, or one set in it",
         )
         command.add_argument("--json", action="store_true", help="print JSON")
 
+    registry_help = "infrastructure flag registry (TOML) to compare WorkOS with"
+
     flags = commands.add_parser("flags", help="feature flags").add_subparsers(dest="command", required=True)
-    flags_list = flags.add_parser("list", help="list WorkOS flags with the declared ones")
-    sets_argument(flags_list, required=False)
-    flags_list.add_argument("--owner", help="only flags declared by or tagged with this owner")
+    flags_list = flags.add_parser("list", help="list WorkOS flags with their status")
+    common(flags_list, sets_required=False)
+    flags_list.add_argument("--registry", help=registry_help)
+    flags_list.add_argument("--owner", help="only flags the registry gives this owner, or tagged with it")
     flags_list.set_defaults(handler=_flags_list)
-    flags_check = flags.add_parser("check", help="check the declared flags exist and are tagged")
-    sets_argument(flags_check)
+    flags_check = flags.add_parser("check", help="check WorkOS holds the declared or registered flags")
+    common(flags_check, sets_required=False)
+    flags_check.add_argument("--registry", help=registry_help)
     flags_check.add_argument(
         "--targeting", action="store_true", help="also check organisations have what each flag requires"
     )
@@ -241,19 +230,13 @@ def build_parser() -> argparse.ArgumentParser:
     permissions = commands.add_parser("permissions", help="RBAC permissions").add_subparsers(
         dest="command", required=True
     )
-    permissions_list = permissions.add_parser("list", help="list permissions with the declared ones")
-    sets_argument(permissions_list, required=False)
+    permissions_list = permissions.add_parser("list", help="list WorkOS permissions with their status")
+    common(permissions_list, sets_required=False)
     permissions_list.set_defaults(handler=_permissions_list)
-    permissions_check = permissions.add_parser("check", help="check the declared permissions match WorkOS")
-    sets_argument(permissions_check)
+    permissions_check = permissions.add_parser("check", help="check WorkOS holds the declared permissions")
+    common(permissions_check, sets_required=True)
     permissions_check.add_argument("--strict", action="store_true", help="fail on warnings too")
     permissions_check.set_defaults(handler=_permissions_check)
-    permissions_sync = permissions.add_parser("sync", help="create and update the declared permissions")
-    sets_argument(permissions_sync)
-    permissions_sync.add_argument(
-        "--dry-run", action="store_true", help="show the changes without making them"
-    )
-    permissions_sync.set_defaults(handler=_permissions_sync)
     return parser
 
 
