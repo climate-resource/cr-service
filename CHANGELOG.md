@@ -21,6 +21,14 @@ from the examples given in that link.
 
 <!-- towncrier release notes start -->
 
+## cr-service v0.5.1 (2026-10-01)
+
+### Features
+
+- Shares one JWKS cache per JWKS URL and one API key verifier per `WORKOS_API_KEY` across every `build_authenticator` call in a process.
+  `cr_service.auth.clear_auth_caches()` resets them for tests. ([#12](https://github.com/climate-resource/cr-service/pull/12))
+
+
 ## cr-service v0.5.0 (2026-09-30)
 
 ### Breaking Changes
