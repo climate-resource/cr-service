@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from cr_service import AuthConfig, ServiceInfo, ServiceSettings, setup
+from cr_service.auth import clear_auth_caches
 from cr_service.auth.testing import TokenFactory
 
 SERVICE = ServiceInfo(name="test-service", version="1.2.3")
@@ -21,6 +22,13 @@ def clean_env(monkeypatch, tmp_path):
         if name.startswith(_ENV_PREFIXES) or name in {"ENVIRONMENT", "GIT_COMMIT", "IMAGE_TAG"}:
             monkeypatch.delenv(name)
     monkeypatch.chdir(tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def fresh_auth_caches():
+    clear_auth_caches()
+    yield
+    clear_auth_caches()
 
 
 def make_settings(**overrides) -> ServiceSettings:

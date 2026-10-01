@@ -4,7 +4,7 @@ Everything a service needs is exported here.
 The lower-level pieces (the verifier, key sources and WorkOS environments) stay importable from their modules.
 """
 
-from cr_service.auth.authenticator import Authenticator, build_authenticator
+from cr_service.auth.authenticator import Authenticator, build_authenticator, clear_auth_caches
 from cr_service.auth.dependencies import (
     AuthConfig,
     CurrentPrincipal,
@@ -44,6 +44,7 @@ __all__ = [
     "SuccessHook",
     "base_authenticator",
     "build_authenticator",
+    "clear_auth_caches",
     "install_auth",
     "require_feature_flag",
     "require_permission",
