@@ -77,10 +77,11 @@ class WorkOSAuthenticator:
             principal = await self._verifier.verify(token)
         if self._allowed_organization_ids and principal.organization_id not in self._allowed_organization_ids:
             raise AuthorizationError("Organisation is not allowed to use this service")
-        # Feature flags are targeted at organisations a person belongs to, so machines are exempt.
+        # Client-credentials tokens carry no feature flags, so only they are exempt.
+        exempt = principal.kind == "machine" and principal.credential == "access_token"
         if (
             self._required_feature_flag
-            and principal.kind == "user"
+            and not exempt
             and not principal.has_feature_flag(self._required_feature_flag)
         ):
             raise AuthorizationError(
