@@ -220,9 +220,12 @@ def test_api_keys_pass_the_organisation_and_feature_flag_gates():
     allowed = api_key_client(workos, workos_required_feature_flag="app:things")
     assert allowed.get("/me", headers={"Authorization": "Bearer sk_user"}).status_code == 200
 
+    assert allowed.get("/me", headers={"Authorization": "Bearer sk_org"}).status_code == 200
+
     workos.flags = []
     unflagged = api_key_client(workos, workos_required_feature_flag="app:things")
     assert unflagged.get("/me", headers={"Authorization": "Bearer sk_user"}).status_code == 403
+    assert unflagged.get("/me", headers={"Authorization": "Bearer sk_org"}).status_code == 403
 
     elsewhere = api_key_client(FakeWorkOS(), workos_allowed_organization_ids="org_other")
     assert elsewhere.get("/me", headers={"Authorization": "Bearer sk_org"}).status_code == 403
