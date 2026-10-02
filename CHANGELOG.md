@@ -21,6 +21,13 @@ from the examples given in that link.
 
 <!-- towncrier release notes start -->
 
+## cr-service v0.5.2 (2026-10-02)
+
+### Bug Fixes
+
+- Applies `WORKOS_REQUIRED_FEATURE_FLAG` to organisation API keys, which previously passed it as machines. ([#13](https://github.com/climate-resource/cr-service/pull/13))
+
+
 ## cr-service v0.5.1 (2026-10-01)
 
 ### Features
