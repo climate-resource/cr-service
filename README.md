@@ -16,6 +16,8 @@ What it provides:
 - The wide-event access log, correlation headers, Sentry, OpenTelemetry, Prometheus, Pyroscope and health probes.
 - A token factory that signs real tokens, so tests go through the production verifier.
 
+The infrastructure [observability docs][observability] cover where the logs, metrics, traces and profiles go.
+
 ## Quick start
 
 ```python
@@ -57,6 +59,8 @@ def build_app() -> fastapi.FastAPI:
 
 - logging and Sentry, from the settings,
 - the Pyroscope profiler, when `PYROSCOPE_SERVER_ADDRESS` is set,
+  tagging profiles like log lines and each request with its route template as `endpoint` and its `method`
+  (per thread, so approximate under concurrent async requests),
 - the wide-event, route-tag and forwarded-prefix middleware,
 - `/livez` and `/readyz`, running any `readiness_checks` passed in,
 - `/metrics`,
@@ -80,6 +84,11 @@ Field names map straight to variable names.
 | `SENTRY_DSN` | unset | Sentry is off when unset. |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0` | |
 | `SENTRY_RELEASE` | `<service>@<version>` | The deploy sets it to the revision. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Tracing is off when unset. Without the `tracing` extra it only warns. |
+| `OTEL_SERVICE_NAME` | the service name | Names the service in traces. |
+| `OTEL_RESOURCE_ATTRIBUTES` | empty | More resource attributes on every span. |
+| `PYROSCOPE_SERVER_ADDRESS` | unset | Profiling is off when unset. Without the `profiling` extra it only warns. |
+| `GIT_COMMIT` | unset | The `commit` on every log line, falling back to `IMAGE_TAG`. |
 | `AUTH_PROVIDER` | `workos` | `local` lets every request in as a fixed identity. `fake` does so only for `AUTH_FAKE_TOKEN`. Both need `ENVIRONMENT=local`. |
 | `AUTH_ENFORCE` | `true` | `false` is shadow mode: authentication failures are logged, not enforced. Authorisation is still enforced. |
 | `AUTH_ALLOW_PRODUCTION_SHADOW` | `false` | Allows `AUTH_ENFORCE=false` in production, which is otherwise refused. |
@@ -98,25 +107,32 @@ Field names map straight to variable names.
 | `WORKOS_ENVIRONMENT` | from `ENVIRONMENT` | `production` or `staging`, to override the mapping below. |
 | `WORKOS_API_KEY` | unset | Secret. Only needed for `WorkOSClient` and `WORKOS_ACCEPT_API_KEYS`. |
 
-Every variable except `WORKOS_API_KEY` is public,
-so it belongs in the deploy config rather than in chamber.
+The `OTEL_`, `PYROSCOPE_`, `SENTRY_RELEASE` and `GIT_COMMIT` variables are read from the process environment,
+not from `.env`.
+
+`WORKOS_API_KEY` is the only secret, so it alone goes in chamber,
+as [Secrets][secrets] and [Secret management][secret-management] describe.
+Every other variable is public deploy configuration, which [Deploying applications][deploy-config] places.
 
 ### WorkOS environments
 
 `ENVIRONMENT=production` verifies tokens from the production WorkOS environment.
 Every other environment, `local` included, uses staging.
-The values are in `cr_service/workos.py`:
+`WORKOS_ENVIRONMENT` overrides the mapping.
+
+Each environment's issuers, JWKS URLs and AuthKit domain are built into `cr_service/workos.py`,
+so a service never sets them.
+[WorkOS core configuration][workos-urls] lists the user-token issuer and JWKS,
+and explains why the issuer names the environment's default application.
+Machine tokens come from the environment's [AuthKit domain][workos-domain],
+with the default application's client id as their audience.
+
+The `bookshelf` CLI signs people in with its own application in each environment:
 
 | | Production | Staging |
 |---|---|---|
-| User-token issuer | `https://auth-api.climateresource.com.au/user_management/client_01KABZE0SFNZXEYZ337HSVBZ36` | `https://auth-api.climateresource.com.au/user_management/client_01KABZE0E62YS9H7BMV6YZGMD1` |
-| User-token JWKS | `https://auth-api.climateresource.com.au/sso/jwks/client_01KABZE0SFNZXEYZ337HSVBZ36` | `https://auth-api.climateresource.com.au/sso/jwks/client_01KABZE0E62YS9H7BMV6YZGMD1` |
-| Machine-token issuer | `https://auth.climateresource.com.au` | `https://balanced-universe-28-staging.authkit.app` |
 | Bookshelf CLI application | `client_01KY695M48CT84XBQ53EDTG8PE` | `client_01M2EV5XYS01J8283Q89M9BHQM` |
 
-Each environment signs every application's tokens with one key,
-so the JWKS is the same whichever application a token was minted for.
-The issuer names the environment's default application, not the service's own.
 `settings.public_auth_config()` returns what a browser needs to sign in, for a `/config` endpoint.
 
 ## Authentication
@@ -279,9 +295,35 @@ Outside a request, `with cr_service.log_scope(job_id=...):` opens one.
 The JSON line holds `ts`, `level`, `logger` and `message`,
 then `service`, `version`, `commit`, `env` and `instance_id`,
 then the request context, then the record's `extra`.
-A 422's validation errors land on the wide event as `validation_errors`.
 The wide event logs at `error` for an unhandled exception or any 5xx, and at `info` otherwise.
 Health probes log at `debug`, or at `warning` when they fail.
+
+### The wide event
+
+Every HTTP request produces one record with `event` set to `http_request`.
+It carries the request context, which holds `request_id`, and these fields:
+
+| Field | Meaning |
+|---|---|
+| `method` | HTTP method. |
+| `path` | Request path. |
+| `query` | Query parameters, with credential-looking values masked. |
+| `status` | Response status code. |
+| `duration_ms` | Wall-clock request time. |
+| `response_bytes` | Response body size. |
+| `client_ip` | From `x-forwarded-for`, falling back to the socket peer. |
+| `user_agent` | Request header. |
+| `referer` | Request header, masked the same way as `query`. |
+| `sentry_trace_id` | Sentry's trace id, for cross-tool correlation. |
+| `trace_id`, `span_id` | The OpenTelemetry request span, when tracing is on. |
+| `error_type` | Exception class name, only on an unhandled exception. |
+| `validation_errors` | Only on a 422. |
+
+`request_id` ties the signals together.
+It comes from `x-request-id`, then `x-amzn-trace-id`, or is minted when neither is set.
+The response carries it back in `x-request-id`,
+the request span carries it as an attribute and Sentry events carry it as a tag.
+So a log line leads to its trace, a trace to its log line, and both to the Sentry event.
 
 ### Secrets
 
@@ -348,6 +390,9 @@ Call `cr_service.auth.clear_auth_caches()` between tests that need a fresh JWKS 
 
 ## Migrating a templated service
 
+The copier-python-service 0.12.0 update does steps 1 to 4 for the template's own code.
+Anything a service added to the deleted modules, and steps 5 and 6, still has to be done by hand.
+
 1. Add `cr-service[tracing,profiling]` to the dependencies.
 2. Delete `logging_config.py`, `middleware.py`, `sentry.py`, `tracing.py`, `metrics.py`, `profiling.py`
    and `routes/health.py`.
@@ -366,3 +411,10 @@ make checks
 
 Each pull request adds a changelog fragment, see `changelog/README.md`.
 Releases go through the `Bump version` workflow, and tags publish to PyPI.
+
+[observability]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/architecture/observability.md
+[secrets]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/architecture/secrets.md
+[secret-management]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/production/secret-management.md
+[deploy-config]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/production/deploying-applications.md#what-the-namespace-provides
+[workos-urls]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/production/workos-core-config.md#3-jwks-and-issuer-urls
+[workos-domain]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/production/workos-core-config.md#2-custom-authentication-domain
