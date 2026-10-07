@@ -388,19 +388,6 @@ def test_create_thing(client, tokens):
 and `tokens.sign(claims)` signs anything, for malformed-token tests.
 Call `cr_service.auth.clear_auth_caches()` between tests that need a fresh JWKS cache or API key verifier.
 
-## Migrating a templated service
-
-The copier-python-service 0.12.0 update does steps 1 to 4 for the template's own code.
-Anything a service added to the deleted modules, and steps 5 and 6, still has to be done by hand.
-
-1. Add `cr-service[tracing,profiling]` to the dependencies.
-2. Delete `logging_config.py`, `middleware.py`, `sentry.py`, `tracing.py`, `metrics.py`, `profiling.py`
-   and `routes/health.py`.
-3. Make `Settings` subclass `cr_service.ServiceSettings` and drop the fields it now provides.
-4. Replace the body of `build_app` with the quick-start shape above.
-5. Replace any hand-written WorkOS verifier with the dependencies, and move its variables to the names above.
-6. Regenerate `docs/openapi.json`, which gains the `WorkOS` bearer security scheme.
-
 ## Development
 
 ```sh
