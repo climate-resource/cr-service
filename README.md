@@ -110,9 +110,7 @@ Field names map straight to variable names.
 The `OTEL_`, `PYROSCOPE_`, `SENTRY_RELEASE` and `GIT_COMMIT` variables are read from the process environment,
 not from `.env`.
 
-`WORKOS_API_KEY` is the only secret, so it alone goes in chamber,
-as [Secrets][secrets] and [Secret management][secret-management] describe.
-Every other variable is public deploy configuration, which [Deploying applications][deploy-config] places.
+[Secrets][secrets] says which of these go in chamber and where the rest go.
 
 ### WorkOS environments
 
@@ -401,7 +399,5 @@ Releases go through the `Bump version` workflow, and tags publish to PyPI.
 
 [observability]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/architecture/observability.md
 [secrets]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/architecture/secrets.md
-[secret-management]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/production/secret-management.md
-[deploy-config]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/production/deploying-applications.md#what-the-namespace-provides
 [workos-urls]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/production/workos-core-config.md#3-jwks-and-issuer-urls
 [workos-domain]: https://github.com/climate-resource/infrastructure/blob/main/docs/playbook/production/workos-core-config.md#2-custom-authentication-domain

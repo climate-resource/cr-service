@@ -1,6 +1,5 @@
 """Climate Resource's WorkOS environments.
 
-None of these values are secret: they identify an environment and authenticate nothing.
 Both environments serve tokens from the custom API domain,
 and each signs every application's tokens with one environment-wide key.
 """
