@@ -15,7 +15,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "fastapi>=0.115.12",
+    "fastapi>=0.142.0",
     "httpx>=0.28.1",
     "prometheus-fastapi-instrumentator>=7.0.0",
     "pydantic-settings>=2.9.1",
@@ -28,7 +28,6 @@ dynamic = ["version"]
 profiling = ["pyroscope-io>=0.8.7"]
 tracing = [
     "opentelemetry-exporter-otlp-proto-http>=1.30.0",
-    "opentelemetry-instrumentation-fastapi>=0.51b0",
     "opentelemetry-sdk>=1.30.0",
 ]
 
@@ -56,7 +55,10 @@ cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true 
 
 [dependency-groups]
 dev = [
+    "aiosqlite>=0.22.1",
     "mypy>=1.15.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.30.0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.66b0",
     "opentelemetry-sdk>=1.30.0",
     "pre-commit>=4.2.0",
     "pytest>=8.3.5",
@@ -64,6 +66,7 @@ dev = [
     "pytest-cov>=6.1.1",
     "respx>=0.22.0",
     "ruff>=0.11.8",
+    "sqlalchemy[asyncio]>=2.1.4",
     "towncrier>=24.8.0",
     "uvicorn>=0.34.0",
 ]

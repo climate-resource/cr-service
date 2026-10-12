@@ -9,6 +9,9 @@ logger = logging.getLogger(__name__)
 
 router = fastapi.APIRouter(include_in_schema=False)
 
+# Kept out of traces, metrics and the info-level access log so they do not drown out real traffic.
+PROBE_PATHS = ("/livez", "/readyz", "/metrics")
+
 
 @router.get("/livez")
 def liveness_probe() -> dict[str, str]:
