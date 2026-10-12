@@ -64,7 +64,8 @@ def build_app() -> fastapi.FastAPI:
 - the wide-event, route-tag and forwarded-prefix middleware,
 - `/livez` and `/readyz`, running any `readiness_checks` passed in,
 - `/metrics`,
-- OpenTelemetry, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set,
+- an OpenTelemetry tracer provider, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set,
+  which switches on FastAPI's native request spans, with `/livez`, `/readyz` and `/metrics` left out,
 - auth, unless `auth=None` is passed.
 
 Add the service's own middleware, such as CORS, before calling `setup`,
@@ -294,7 +295,9 @@ Outside a request, `with cr_service.log_scope(job_id=...):` opens one.
 
 The JSON line holds `ts`, `level`, `logger` and `message`,
 then `service`, `version`, `commit`, `env` and `instance_id`,
+then `trace_id` and `span_id` of the active span when tracing is on,
 then the request context, then the record's `extra`.
+Inside an endpoint the span is `fastapi.endpoint`, so Grafana links each line to its trace.
 The wide event logs at `error` for an unhandled exception or any 5xx, and at `info` otherwise.
 Health probes log at `debug`, or at `warning` when they fail.
 
@@ -353,9 +356,13 @@ and anything else can read `cr_service.get_context()`.
 
 - `cr_service.auth.workos_api.WorkOSClient` fetches users and organisations with `WORKOS_API_KEY`,
   pages through an organisation's members and feature flags, and validates API keys.
-- `cr_service.tracing.instrument_sqlalchemy(engine)` adds a span per statement.
+- `cr_service.tracing.instrument_sqlalchemy(engine)` adds a span per statement, nested under the endpoint span.
   It needs `opentelemetry-instrumentation-sqlalchemy` installed.
+  Call it once per process, because the instrumentor ignores a second engine.
 - `cr_service.tracing.set_span_attributes(...)` and `current_trace_context()` work without the tracing extra.
+- Do not add `opentelemetry-instrumentation-fastapi`.
+  FastAPI switches its native telemetry off when it finds that middleware,
+  so the traces lose the dependency, endpoint and serialisation spans.
 
 ## Testing a service
 

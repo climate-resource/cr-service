@@ -20,6 +20,7 @@ from cr_service import redact
 from cr_service.context import get_context
 from cr_service.info import ServiceInfo
 from cr_service.settings import ServiceSettings
+from cr_service.tracing import current_trace_context
 
 _ENV_CONTEXT: dict[str, Any] = {}
 
@@ -39,8 +40,8 @@ def build_env_context(service: ServiceInfo, environment: str) -> dict[str, Any]:
 
 
 def _record_fields(record: logging.LogRecord) -> dict[str, Any]:
-    """Merge the request context with the record's ``extra``, which wins on a clash."""
-    fields = get_context()
+    """Merge the active span, the request context and the record's ``extra``, which wins on a clash."""
+    fields = current_trace_context() | get_context()
     for key, value in record.__dict__.items():
         if key in _RESERVED_LOG_RECORD_KEYS or key.startswith("_"):
             continue
@@ -85,8 +86,8 @@ class TextFormatter(logging.Formatter):
 def merge_request_context(
     _logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]
 ) -> MutableMapping[str, Any]:
-    """Structlog processor that adds the request context, for services that log through structlog."""
-    for key, value in redact.redact_fields(get_context()).items():
+    """Structlog processor that adds the active span and request context, for services using structlog."""
+    for key, value in redact.redact_fields(current_trace_context() | get_context()).items():
         event_dict.setdefault(key, value)
     return event_dict
 

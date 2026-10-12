@@ -50,7 +50,7 @@ def setup(  # noqa: PLR0913
 
     app.include_router(health_router)
     metrics.instrument_app(app)
-    tracing.instrument_app(app, service)
+    tracing.install_provider(service)
 
     if auth is not None:
         install_auth(app, settings, auth)
