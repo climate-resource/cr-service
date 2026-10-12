@@ -36,7 +36,6 @@ def install_provider(service: ServiceInfo) -> None:
         from opentelemetry.sdk.resources import Resource  # noqa: PLC0415
         from opentelemetry.sdk.trace import TracerProvider  # noqa: PLC0415
         from opentelemetry.sdk.trace.export import BatchSpanProcessor  # noqa: PLC0415
-        from opentelemetry.sdk.trace.sampling import ParentBased  # noqa: PLC0415
 
         from cr_service._probe_sampler import SkipProbes  # noqa: PLC0415
     except ImportError:
@@ -45,7 +44,7 @@ def install_provider(service: ServiceInfo) -> None:
 
     service_name = os.environ.get("OTEL_SERVICE_NAME", service.name)
     resource = Resource.create({"service.name": service_name, "service.version": service.version})
-    provider = TracerProvider(resource=resource, sampler=ParentBased(SkipProbes()))
+    provider = TracerProvider(resource=resource, sampler=SkipProbes())
     provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     trace.set_tracer_provider(provider)
     _provider_installed = True

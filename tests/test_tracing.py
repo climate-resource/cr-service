@@ -61,8 +61,8 @@ def test_native_request_spans_skip_probes(spans, access_records):
 
     client = TestClient(app)
     client.get("/items/3")
-    client.get("/livez")
-    client.get("/metrics")
+    for probe in ("/livez", "/readyz", "/metrics"):
+        client.get(probe)
 
     finished = spans.get_finished_spans()
     assert {span.instrumentation_scope.name for span in finished} == {"fastapi"}
@@ -70,6 +70,21 @@ def test_native_request_spans_skip_probes(spans, access_records):
     assert request.name == "GET /items/{item_id}"
     event = next(record for record in access_records() if record.path == "/items/3")
     assert event.trace_id == trace.format_trace_id(request.context.trace_id)
+
+
+@pytest.mark.parametrize("probe", ["/livez", "/readyz", "/metrics"])
+def test_probes_stay_untraced_under_a_sampled_parent(spans, probe):
+    upstream_trace_id = "0af7651916cd43dd8448eb211c80319c"
+    headers = {"traceparent": f"00-{upstream_trace_id}-b7ad6b7169203331-01"}
+    client = TestClient(build_app(make_settings(), auth=None))
+
+    client.get(probe, headers=headers)
+    assert spans.get_finished_spans() == ()
+
+    client.get("/missing", headers=headers)
+    assert {trace.format_trace_id(span.context.trace_id) for span in spans.get_finished_spans()} == {
+        upstream_trace_id
+    }
 
 
 def span_named(spans, name):
