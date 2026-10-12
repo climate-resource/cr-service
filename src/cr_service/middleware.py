@@ -15,12 +15,11 @@ from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from cr_service import context, redact
+from cr_service.health import PROBE_PATHS
 from cr_service.tracing import current_trace_context, set_span_attributes
 
 logger = logging.getLogger("access")
 
-# Probe hits are logged at debug so they do not drown out real traffic.
-_PROBE_PATHS = frozenset({"/livez", "/readyz", "/metrics"})
 
 # Shadow failures report as fail, so clients see the outcome enforcement would have.
 _AUTH_STATUS_HEADER = {"pass": b"pass", "skipped": b"skipped", "fail": b"fail", "shadow_fail": b"fail"}
@@ -123,7 +122,7 @@ class WideEventMiddleware:
             if error_type:
                 event["error_type"] = error_type
                 logger.error("http_request", extra=event)
-            elif request.url.path in _PROBE_PATHS:
+            elif request.url.path in PROBE_PATHS:
                 # A failing probe repeats every period, so it warns rather than paging as an error.
                 failing = status_code is None or status_code >= http.HTTPStatus.BAD_REQUEST
                 logger.log(logging.WARNING if failing else logging.DEBUG, "http_request", extra=event)

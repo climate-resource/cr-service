@@ -7,8 +7,7 @@ from opentelemetry.sdk.trace.sampling import ALWAYS_OFF, ALWAYS_ON, Sampler, Sam
 from opentelemetry.trace import Link, SpanKind, TraceState
 from opentelemetry.util.types import Attributes
 
-# Suffixes, so a probe still matches behind a gateway prefix.
-PROBE_PATHS = ("/livez", "/readyz", "/metrics")
+from cr_service.health import PROBE_PATHS
 
 
 class SkipProbes(Sampler):
@@ -26,6 +25,7 @@ class SkipProbes(Sampler):
     ) -> SamplingResult:
         """Delegate to ``ALWAYS_OFF`` for a probe path and ``ALWAYS_ON`` otherwise."""
         path: object = attributes.get("url.path") if attributes else None
+        # Suffix match, so a probe still matches behind a gateway prefix.
         sampler = ALWAYS_OFF if isinstance(path, str) and path.endswith(PROBE_PATHS) else ALWAYS_ON
         return sampler.should_sample(parent_context, trace_id, name, kind, attributes, links, trace_state)
 

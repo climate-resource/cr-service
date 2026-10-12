@@ -3,6 +3,8 @@
 import fastapi
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from cr_service.health import PROBE_PATHS
+
 LATENCY_BUCKETS = (0.05, 0.1, 0.25, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 10.0, 30.0)
 
 
@@ -14,6 +16,6 @@ def instrument_app(app: fastapi.FastAPI) -> None:
     Any counter or histogram made with ``prometheus_client`` shows up there too.
     """
     Instrumentator(
-        excluded_handlers=["/metrics", "/livez", "/readyz"],
+        excluded_handlers=list(PROBE_PATHS),
         should_group_status_codes=False,
     ).instrument(app, latency_lowr_buckets=LATENCY_BUCKETS).expose(app, include_in_schema=False)

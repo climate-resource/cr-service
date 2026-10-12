@@ -39,9 +39,16 @@ def build_env_context(service: ServiceInfo, environment: str) -> dict[str, Any]:
     return {key: value for key, value in fields.items() if value is not None}
 
 
+def _ambient_fields() -> dict[str, Any]:
+    """Return the active span's ids overlaid by the request context."""
+    fields = current_trace_context()
+    fields |= get_context()
+    return fields
+
+
 def _record_fields(record: logging.LogRecord) -> dict[str, Any]:
     """Merge the active span, the request context and the record's ``extra``, which wins on a clash."""
-    fields = current_trace_context() | get_context()
+    fields = _ambient_fields()
     for key, value in record.__dict__.items():
         if key in _RESERVED_LOG_RECORD_KEYS or key.startswith("_"):
             continue
@@ -87,7 +94,7 @@ def merge_request_context(
     _logger: Any, _method_name: str, event_dict: MutableMapping[str, Any]
 ) -> MutableMapping[str, Any]:
     """Structlog processor that adds the active span and request context, for services using structlog."""
-    for key, value in redact.redact_fields(current_trace_context() | get_context()).items():
+    for key, value in redact.redact_fields(_ambient_fields()).items():
         event_dict.setdefault(key, value)
     return event_dict
 

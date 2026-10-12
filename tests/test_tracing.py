@@ -24,7 +24,7 @@ def test_trace_context_and_attributes():
     with tracer.start_as_current_span("span") as span:
         set_span_attributes(request_id="req-1", dropped={"a": 1})
         context = current_trace_context()
-        assert context["trace_id"] == format(span.get_span_context().trace_id, "032x")
+        assert context["trace_id"] == trace.format_trace_id(span.get_span_context().trace_id)
         assert span.attributes == {"request_id": "req-1"}
 
 
@@ -69,7 +69,7 @@ def test_native_request_spans_skip_probes(spans, access_records):
     (request,) = [span for span in finished if span.parent is None]
     assert request.name == "GET /items/{item_id}"
     event = next(record for record in access_records() if record.path == "/items/3")
-    assert event.trace_id == format(request.context.trace_id, "032x")
+    assert event.trace_id == trace.format_trace_id(request.context.trace_id)
 
 
 def span_named(spans, name):
@@ -89,8 +89,14 @@ def test_app_logs_point_at_the_endpoint_span(spans):
     TestClient(app).get("/work")
 
     endpoint = span_named(spans, "fastapi.endpoint")
-    assert lines[0]["trace_id"] == format(endpoint.context.trace_id, "032x")
-    assert lines[0]["span_id"] == format(endpoint.context.span_id, "016x")
+    assert lines[0]["trace_id"] == trace.format_trace_id(endpoint.context.trace_id)
+    assert lines[0]["span_id"] == trace.format_span_id(endpoint.context.span_id)
+
+
+def assert_query_under_endpoint(spans):
+    query = span_named(spans, "select")
+    assert query.parent.span_id == span_named(spans, "fastapi.endpoint").context.span_id
+    assert query.attributes["db.statement"].startswith("select 1")
 
 
 @pytest.fixture
@@ -111,10 +117,7 @@ def test_sqlalchemy_spans_nest_under_the_endpoint(spans, uninstrument_sqlalchemy
 
     assert TestClient(app).get("/rows").json() == {"value": 1}
 
-    endpoint = span_named(spans, "fastapi.endpoint")
-    query = span_named(spans, "select")
-    assert query.parent.span_id == endpoint.context.span_id
-    assert query.attributes["db.statement"].startswith("select 1")
+    assert_query_under_endpoint(spans)
 
 
 async def test_async_sqlalchemy_spans_nest_under_the_endpoint(spans, uninstrument_sqlalchemy):
@@ -130,6 +133,4 @@ async def test_async_sqlalchemy_spans_nest_under_the_endpoint(spans, uninstrumen
     assert TestClient(app).get("/rows").json() == {"value": 1}
     await engine.dispose()
 
-    endpoint = span_named(spans, "fastapi.endpoint")
-    query = span_named(spans, "select")
-    assert query.parent.span_id == endpoint.context.span_id
+    assert_query_under_endpoint(spans)
