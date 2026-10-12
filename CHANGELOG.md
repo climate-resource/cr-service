@@ -21,6 +21,35 @@ from the examples given in that link.
 
 <!-- towncrier release notes start -->
 
+## cr-service v0.6.0 (2026-10-12)
+
+### Breaking Changes
+
+- Requires FastAPI 0.142 or later, and renames `cr_service.tracing.instrument_app(app, service)` to `install_provider(service)`.
+  Trace attributes follow the current semantic conventions, such as `http.response.status_code` in place of `http.status_code`.
+  `OTEL_TRACES_SAMPLER` is no longer read. ([#22](https://github.com/climate-resource/cr-service/pull/22))
+
+### Features
+
+- Traces requests with FastAPI's native telemetry in place of `opentelemetry-instrumentation-fastapi`,
+  adding spans for dependency resolution, the endpoint, serialisation and background tasks.
+  Every log line inside a request now carries `trace_id` and `span_id`. ([#22](https://github.com/climate-resource/cr-service/pull/22))
+
+### Bug Fixes
+
+- Traces SQLAlchemy 2.1 statements with `instrument_sqlalchemy`, which the instrumentor's version cap had silently skipped. ([#22](https://github.com/climate-resource/cr-service/pull/22))
+
+### Improved Documentation
+
+- Links the infrastructure playbook for WorkOS URLs, secrets, deploy configuration and observability,
+  documents the tracing and profiling variables and the wide event fields,
+  and removes the migration guide now that every templated service uses cr-service. ([#17](https://github.com/climate-resource/cr-service/pull/17))
+
+### Trivial/Internal Changes
+
+- [#16](https://github.com/climate-resource/cr-service/pull/16)
+
+
 ## cr-service v0.5.2 (2026-10-02)
 
 ### Bug Fixes
