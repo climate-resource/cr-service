@@ -102,6 +102,7 @@ Field names map straight to variable names.
 | `WORKOS_REQUIRED_FEATURE_FLAG` | unset | Feature flag the user's organisation must have, such as `app:bookshelf`. |
 | `WORKOS_ALLOWED_ORGANIZATION_IDS` | empty | Organisations allowed in. Empty allows any. |
 | `WORKOS_MACHINE_CLIENTS` | `{}` | JSON mapping machine client ids to the permissions each is granted. |
+| `WORKOS_ACCEPT_MACHINE_CLIENTS` | `false` | Accept every Climate Resource machine client, with the permissions in its token. |
 | `WORKOS_MACHINE_CLIENT_ORGANIZATIONS` | `{}` | JSON mapping machine client ids to the organisations each may act for. |
 | `WORKOS_REQUIRE_EMAIL` | `false` | Refuse user tokens without an `email` claim. |
 | `WORKOS_ACCEPT_API_KEYS` | `false` | Accept WorkOS API keys as bearer tokens. Needs `WORKOS_API_KEY`. |
@@ -162,8 +163,12 @@ With `WORKOS_REQUIRE_EMAIL=true` they must also carry an email.
 When a token names the application it was minted for, that must be `WORKOS_CLIENT_ID`
 or one of `WORKOS_ADDITIONAL_CLIENT_IDS`,
 or the bookshelf CLI's application when `WORKOS_ACCEPT_BOOKSHELF_TOKENS=true`.
-Machine tokens are only accepted from client ids listed in `WORKOS_MACHINE_CLIENTS`,
-and their permissions come from that list, never from the token.
+Machine tokens are accepted from client ids listed in `WORKOS_MACHINE_CLIENTS`,
+and a listed client's permissions come from that list, never from the token.
+With `WORKOS_ACCEPT_MACHINE_CLIENTS=true`, any machine client of the Climate Resource organisation is accepted too.
+Its permissions are the WorkOS permissions granted to the client, which arrive as the token's `scope`.
+WorkOS only grants a scope that names an existing permission,
+so granting one is a WorkOS change and needs no release of the service.
 Every machine token must carry an `org_id`,
 and a client listed in `WORKOS_MACHINE_CLIENT_ORGANIZATIONS` must name one of its organisations.
 
