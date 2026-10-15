@@ -11,14 +11,14 @@ class AuthOutcome(enum.StrEnum):
     FAIL = "fail"
     SHADOW_FAIL = "shadow_fail"
 
-    @property
-    def reported(self) -> "AuthOutcome":
-        """The outcome clients see, which is the one enforcement would have given."""
-        return AuthOutcome.FAIL if self is AuthOutcome.SHADOW_FAIL else self
+
+# Shadow failures report as fail, so clients see the outcome enforcement would have given.
+_HEADER_VALUES = {
+    outcome.value: (AuthOutcome.FAIL if outcome is AuthOutcome.SHADOW_FAIL else outcome).encode()
+    for outcome in AuthOutcome
+}
 
 
 def auth_status_header(outcome: str | None) -> bytes | None:
     """Return the ``x-auth-status`` value for a bound ``auth_outcome``, or ``None`` for no header."""
-    if outcome is None or outcome not in AuthOutcome:
-        return None
-    return AuthOutcome(outcome).reported.value.encode()
+    return _HEADER_VALUES.get(outcome) if outcome is not None else None

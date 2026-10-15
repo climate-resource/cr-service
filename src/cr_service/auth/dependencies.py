@@ -103,19 +103,23 @@ def install_auth(app: fastapi.FastAPI, settings: ServiceSettings, config: AuthCo
     )
 
 
+def _lookup(app: fastapi.FastAPI) -> _InstalledAuth | None:
+    return typing.cast(_InstalledAuth | None, getattr(app.state, "cr_service_auth", None))
+
+
 def installed_config(app: fastapi.FastAPI) -> AuthConfig | None:
     """Return the config :func:`install_auth` installed on ``app``, or ``None`` before it runs."""
-    installed = getattr(app.state, "cr_service_auth", None)
-    return typing.cast(_InstalledAuth, installed).config if installed is not None else None
+    installed = _lookup(app)
+    return installed.config if installed is not None else None
 
 
 def _installed(request: fastapi.Request) -> _InstalledAuth:
-    installed = getattr(request.app.state, "cr_service_auth", None)
+    installed = _lookup(request.app)
     if installed is None:
         raise RuntimeError(
             "cr_service auth is not installed, call setup() or install_auth() when building the app"
         )
-    return typing.cast(_InstalledAuth, installed)
+    return installed
 
 
 async def base_authenticator(request: fastapi.Request) -> Authenticator:
@@ -192,9 +196,9 @@ async def authenticate_request(
     return AuthAttempt(principal=principal, outcome=outcome)
 
 
-def refuse_request(request: fastapi.Request, error: AuthError) -> AuthAttempt:
-    """Record a failure decided outside the authenticator, such as a missing permission."""
-    return _fail(request, _installed(request), error)
+def _refuse(request: fastapi.Request, error: AuthError) -> None:
+    """Record a failure decided outside the authenticator, such as a missing permission, and raise it."""
+    _fail(request, _installed(request), error).enforce()
 
 
 def _fail(request: fastapi.Request, installed: _InstalledAuth, error: AuthError) -> AuthAttempt:
@@ -288,7 +292,7 @@ def require_permission(*permissions: str) -> Callable[..., Awaitable[Principal]]
             permission for permission in permissions if not has_permission(principal, permission)
         )
         if missing:
-            refuse_request(request, AuthorizationError(f"Missing permission: {', '.join(missing)}")).enforce()
+            _refuse(request, AuthorizationError(f"Missing permission: {', '.join(missing)}"))
         return principal
 
     return check_permissions
@@ -299,7 +303,7 @@ def require_feature_flag(flag: str) -> Callable[..., Awaitable[Principal]]:
 
     async def check_feature_flag(request: fastapi.Request, principal: CurrentPrincipal) -> Principal:
         if not principal.has_feature_flag(flag):
-            refuse_request(request, AuthorizationError(f"Missing feature flag: {flag}")).enforce()
+            _refuse(request, AuthorizationError(f"Missing feature flag: {flag}"))
         return principal
 
     return check_feature_flag
