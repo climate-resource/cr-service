@@ -1,6 +1,7 @@
 """FastAPI dependencies that authenticate and authorise the caller."""
 
 import dataclasses
+import functools
 import logging
 import typing
 from collections.abc import Awaitable, Callable, Sequence
@@ -12,6 +13,7 @@ from cr_service import context
 from cr_service.auth.authenticator import Authenticator, build_authenticator
 from cr_service.auth.errors import AuthenticationError, AuthError, AuthorizationError
 from cr_service.auth.hooks import FailureHook, SuccessHook, log_auth_failure, observe_principal
+from cr_service.auth.outcome import AuthOutcome
 from cr_service.auth.principal import ANONYMOUS, Principal
 from cr_service.settings import ServiceSettings
 
@@ -101,6 +103,12 @@ def install_auth(app: fastapi.FastAPI, settings: ServiceSettings, config: AuthCo
     )
 
 
+def installed_config(app: fastapi.FastAPI) -> AuthConfig | None:
+    """Return the config :func:`install_auth` installed on ``app``, or ``None`` before it runs."""
+    installed = getattr(app.state, "cr_service_auth", None)
+    return typing.cast(_InstalledAuth, installed).config if installed is not None else None
+
+
 def _installed(request: fastapi.Request) -> _InstalledAuth:
     installed = getattr(request.app.state, "cr_service_auth", None)
     if installed is None:
@@ -115,7 +123,8 @@ async def base_authenticator(request: fastapi.Request) -> Authenticator:
     return _installed(request).authenticator
 
 
-def _default_authenticator(installed: _InstalledAuth) -> Authenticator:
+def _default_authenticator(request: fastapi.Request) -> Authenticator:
+    installed = _installed(request)
     if installed.config.authenticator_dependency is not None:
         raise RuntimeError(
             "The app authenticator is not used when authenticator_dependency is set, "
@@ -126,16 +135,90 @@ def _default_authenticator(installed: _InstalledAuth) -> Authenticator:
 
 async def _request_authenticator(request: fastapi.Request) -> Authenticator:
     # install_auth overrides this with AuthConfig.authenticator_dependency.
-    return _default_authenticator(_installed(request))
+    return _default_authenticator(request)
 
 
-def _http_error(
-    request: fastapi.Request, installed: _InstalledAuth, error: AuthError
-) -> fastapi.HTTPException:
+@dataclasses.dataclass(frozen=True, slots=True)
+class AuthAttempt:
+    """What one authentication attempt decided for a request.
+
+    ``outcome`` is ``None`` when nothing was recorded, such as a missing token on an optional route.
+    """
+
+    principal: Principal | None = None
+    outcome: AuthOutcome | None = None
+    error: AuthError | None = None
+    refusal: Callable[[], fastapi.HTTPException] | None = None
+    """Builds the response to raise, set only when the failure is enforced."""
+
+    @property
+    def enforced(self) -> bool:
+        """Whether the request must be refused."""
+        return self.refusal is not None
+
+    def enforce(self) -> Principal | None:
+        """Raise the refusal if the failure is enforced, otherwise return the principal."""
+        if self.refusal is not None:
+            raise self.refusal()
+        return self.principal
+
+
+async def authenticate_request(
+    request: fastapi.Request, authenticator: Authenticator, token: str | None, *, allow_missing: bool = False
+) -> AuthAttempt:
+    """Authenticate the caller once per request, run ``request_checks`` every time and record the outcome.
+
+    With ``allow_missing``, a request without a token gets an empty attempt and records nothing.
+    """
+    installed = _installed(request)
+    state = getattr(request.state, "principal", None)
+    cached = state if isinstance(state, Principal) else None
+    try:
+        principal = cached if cached is not None else await authenticator.authenticate(token)
+        # Checked on every call, so a principal cached by any means cannot skip them.
+        for check in installed.config.request_checks:
+            check(request, principal)
+    except AuthError as error:
+        if allow_missing and isinstance(error, AuthenticationError) and error.missing:
+            return AuthAttempt()
+        return _fail(request, installed, error)
+
+    outcome = AuthOutcome.SKIPPED if principal.credential == "none" else AuthOutcome.PASS
+    if principal is not cached:
+        _record(request, outcome)
+        for hook in (observe_principal, *installed.config.on_success):
+            hook(request, principal)
+        request.state.principal = principal
+    return AuthAttempt(principal=principal, outcome=outcome)
+
+
+def refuse_request(request: fastapi.Request, error: AuthError) -> AuthAttempt:
+    """Record a failure decided outside the authenticator, such as a missing permission."""
+    return _fail(request, _installed(request), error)
+
+
+def _fail(request: fastapi.Request, installed: _InstalledAuth, error: AuthError) -> AuthAttempt:
+    # Shadow mode only lets unauthenticated callers through, never unauthorised ones.
+    enforced = installed.enforce or isinstance(error, AuthorizationError)
+    outcome = AuthOutcome.FAIL if enforced else AuthOutcome.SHADOW_FAIL
+    _record(request, outcome)
+    for hook in (log_auth_failure, *installed.config.on_failure):
+        hook(request, error)
+    refusal = functools.partial(_http_error, request, installed.config, error) if enforced else None
+    return AuthAttempt(outcome=outcome, error=error, refusal=refusal)
+
+
+def _record(request: fastapi.Request, outcome: AuthOutcome) -> None:
+    # Bound as the plain string so text logs and request.state keep the same values.
+    context.bind(auth_outcome=outcome.value)
+    request.state.auth_outcome = outcome.value
+
+
+def _http_error(request: fastapi.Request, config: AuthConfig, error: AuthError) -> fastapi.HTTPException:
     headers: dict[str, str] | None = None
     if isinstance(error, AuthenticationError):
         params = [] if error.missing else ['error="invalid_token"']
-        url = installed.config.resource_metadata_url
+        url = config.resource_metadata_url
         if callable(url):
             url = url(request)
         if url:
@@ -144,67 +227,12 @@ def _http_error(
     return fastapi.HTTPException(status_code=error.status_code, detail=str(error), headers=headers)
 
 
-def _record_outcome(request: fastapi.Request, outcome: str) -> None:
-    context.bind(auth_outcome=outcome)
-    request.state.auth_outcome = outcome
-
-
-def _record_failure(request: fastapi.Request, installed: _InstalledAuth, error: AuthError) -> bool:
-    """Run the failure hooks and return whether the failure is enforced."""
-    # Shadow mode only lets unauthenticated callers through, never unauthorised ones.
-    enforced = installed.enforce or isinstance(error, AuthorizationError)
-    _record_outcome(request, "fail" if enforced else "shadow_fail")
-    for hook in (log_auth_failure, *installed.config.on_failure):
-        hook(request, error)
-    return enforced
-
-
-def _refuse(request: fastapi.Request, error: AuthError) -> None:
-    """Run the failure hooks, then raise unless shadow mode lets an authentication failure through."""
-    installed = _installed(request)
-    if _record_failure(request, installed, error):
-        raise _http_error(request, installed, error)
-
-
-async def _authenticate(
-    request: fastapi.Request,
-    authenticator: Authenticator,
-    credentials: HTTPAuthorizationCredentials | None,
-    *,
-    required: bool,
-    refuse: bool = True,
-) -> Principal | None:
-    installed = _installed(request)
-    state = getattr(request.state, "principal", None)
-    cached = state if isinstance(state, Principal) else None
-    try:
-        if cached is not None:
-            principal = cached
-        else:
-            principal = await authenticator.authenticate(credentials.credentials if credentials else None)
-        # Checked on every call, so a principal cached by any means cannot skip them.
-        for check in installed.config.request_checks:
-            check(request, principal)
-    except AuthError as error:
-        if not required and isinstance(error, AuthenticationError) and error.missing:
-            return None
-        if not refuse:
-            _record_failure(request, installed, error)
-            return None
-        _refuse(request, error)
-        return ANONYMOUS if required else None
-
-    if principal is cached:
-        return principal
-    _record_outcome(request, "skipped" if principal.credential == "none" else "pass")
-    for hook in (observe_principal, *installed.config.on_success):
-        hook(request, principal)
-    request.state.principal = principal
-    return principal
-
-
 RequestAuthenticator = typing.Annotated[Authenticator, fastapi.Depends(_request_authenticator)]
 Credentials = typing.Annotated[HTTPAuthorizationCredentials | None, fastapi.Security(bearer_scheme)]
+
+
+def _token(credentials: HTTPAuthorizationCredentials | None) -> str | None:
+    return credentials.credentials if credentials else None
 
 
 async def require_principal(
@@ -214,16 +242,16 @@ async def require_principal(
 
     In shadow mode an unauthenticated caller gets :data:`ANONYMOUS` instead.
     """
-    principal = await _authenticate(request, authenticator, credentials, required=True)
-    assert principal is not None
-    return principal
+    attempt = await authenticate_request(request, authenticator, _token(credentials))
+    return attempt.enforce() or ANONYMOUS
 
 
 async def optional_principal(
     request: fastapi.Request, credentials: Credentials, authenticator: RequestAuthenticator
 ) -> Principal | None:
     """Return the caller, or ``None`` if the request carries no token. An invalid token is still refused."""
-    return await _authenticate(request, authenticator, credentials, required=False)
+    attempt = await authenticate_request(request, authenticator, _token(credentials), allow_missing=True)
+    return attempt.enforce()
 
 
 async def try_authenticate(
@@ -236,9 +264,10 @@ async def try_authenticate(
     With an ``authenticator_dependency`` configured, pass the request's ``authenticator``.
     """
     if authenticator is None:
-        authenticator = _default_authenticator(_installed(request))
+        authenticator = _default_authenticator(request)
     credentials = await bearer_scheme(request)
-    return await _authenticate(request, authenticator, credentials, required=False, refuse=False)
+    attempt = await authenticate_request(request, authenticator, _token(credentials), allow_missing=True)
+    return attempt.principal
 
 
 CurrentPrincipal = typing.Annotated[Principal, fastapi.Depends(require_principal)]
@@ -259,7 +288,7 @@ def require_permission(*permissions: str) -> Callable[..., Awaitable[Principal]]
             permission for permission in permissions if not has_permission(principal, permission)
         )
         if missing:
-            _refuse(request, AuthorizationError(f"Missing permission: {', '.join(missing)}"))
+            refuse_request(request, AuthorizationError(f"Missing permission: {', '.join(missing)}")).enforce()
         return principal
 
     return check_permissions
@@ -270,7 +299,7 @@ def require_feature_flag(flag: str) -> Callable[..., Awaitable[Principal]]:
 
     async def check_feature_flag(request: fastapi.Request, principal: CurrentPrincipal) -> Principal:
         if not principal.has_feature_flag(flag):
-            _refuse(request, AuthorizationError(f"Missing feature flag: {flag}"))
+            refuse_request(request, AuthorizationError(f"Missing feature flag: {flag}")).enforce()
         return principal
 
     return check_feature_flag
