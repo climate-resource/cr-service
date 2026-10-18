@@ -160,7 +160,7 @@ def build_authenticator(
             audience=None,
         )
     ]
-    if settings.workos_machine_clients:
+    if settings.workos_machine_clients or settings.workos_accept_machine_clients:
         profiles.append(
             TrustProfile(
                 kind="machine",
@@ -174,6 +174,7 @@ def build_authenticator(
         accepted_client_ids=settings.accepted_client_ids,
         machine_clients=settings.workos_machine_clients,
         machine_organizations=settings.workos_machine_client_organizations,
+        machine_organization=workos.organization_id if settings.workos_accept_machine_clients else None,
         require_email=settings.workos_require_email,
     )
     if api_keys is None and settings.workos_accept_api_keys:
