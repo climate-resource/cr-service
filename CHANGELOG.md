@@ -21,6 +21,13 @@ from the examples given in that link.
 
 <!-- towncrier release notes start -->
 
+## cr-service v0.7.0 (2026-10-26)
+
+### Bug Fixes
+
+- `/livez` now answers on the event loop and sync readiness checks run on their own threads, so slow sync routes holding the request thread pool no longer make the probes time out. ([#31](https://github.com/climate-resource/cr-service/pull/31))
+
+
 ## cr-service v0.6.0 (2026-10-12)
 
 ### Breaking Changes
