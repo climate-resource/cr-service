@@ -62,7 +62,9 @@ def build_app() -> fastapi.FastAPI:
   tagging profiles like log lines and each request with its route template as `endpoint` and its `method`
   (per thread, so approximate under concurrent async requests),
 - the wide-event, route-tag and forwarded-prefix middleware,
-- `/livez` and `/readyz`, running any `readiness_checks` passed in,
+- `/livez` and `/readyz`, running any `readiness_checks` passed in.
+  `/livez` answers on the event loop and sync checks run on their own threads,
+  so neither waits behind slow sync routes holding the request thread pool,
 - `/metrics`,
 - an OpenTelemetry tracer provider, when `OTEL_EXPORTER_OTLP_ENDPOINT` is set,
   which switches on FastAPI's native request spans, with `/livez`, `/readyz` and `/metrics` left out,

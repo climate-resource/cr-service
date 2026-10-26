@@ -1,4 +1,9 @@
+import asyncio
+import threading
+
+import anyio.to_thread
 import fastapi
+import httpx
 from fastapi.testclient import TestClient
 
 from cr_service import ServiceSettings, setup, tracing
@@ -25,6 +30,44 @@ def test_readiness_checks():
     response = TestClient(app).get("/readyz")
     assert response.status_code == 503
     assert response.json() == {"detail": {"database": "check returned a falsy result", "cache": "cache down"}}
+
+
+async def test_probes_answer_while_request_threads_are_busy():
+    # Every request thread is held by a slow sync route, as under load on a cold service.
+    release = threading.Event()
+    app = fastapi.FastAPI()
+
+    @app.get("/slow")
+    def slow() -> None:
+        release.wait(5)
+
+    def off_event_loop() -> bool:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return True
+        return False
+
+    setup(app, service=SERVICE, settings=make_settings(), readiness_checks=[off_event_loop])
+    limiter = anyio.to_thread.current_default_thread_limiter()
+    original_tokens = limiter.total_tokens
+    limiter.total_tokens = 1
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            slow_request = asyncio.create_task(client.get("/slow"))
+            with anyio.fail_after(1):
+                while limiter.borrowed_tokens < 1:
+                    await asyncio.sleep(0.01)
+            with anyio.fail_after(1):
+                assert (await client.get("/livez")).json() == {"status": "alive"}
+                assert (await client.get("/readyz")).json() == {"status": "ready"}
+            release.set()
+            await slow_request
+    finally:
+        release.set()
+        limiter.total_tokens = original_tokens
 
 
 def test_metrics():
