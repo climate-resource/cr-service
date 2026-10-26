@@ -37,6 +37,15 @@ def _str_set_claim(claims: Mapping[str, typing.Any], name: str) -> frozenset[str
     return frozenset(item.strip() for item in value if item.strip())
 
 
+def _scope_claim(claims: Mapping[str, typing.Any]) -> frozenset[str]:
+    value = claims.get("scope")
+    if value is None:
+        return frozenset()
+    if not isinstance(value, str):
+        raise AuthenticationError("Access token has a malformed scope claim")
+    return frozenset(value.split())
+
+
 def _bool_claim(claims: Mapping[str, typing.Any], name: str) -> bool:
     # The WorkOS JWT template renders booleans as strings.
     value = claims.get(name)
@@ -60,7 +69,10 @@ class TokenVerifier:
         Applications whose user tokens are accepted, when the token names one.
     machine_clients
         Machine client ids allowed in, each mapped to the permissions it is granted.
-        Permissions come from here, never from the token.
+        A listed client's permissions come from here, never from the token.
+    machine_organization
+        Organisation whose unlisted machine clients are allowed in,
+        with the permissions WorkOS granted them as the token's ``scope``.
     machine_organizations
         Machine client ids mapped to the organisations they may act for.
         A listed client's tokens must carry one of them as ``org_id``.
@@ -68,13 +80,14 @@ class TokenVerifier:
         Refuse user tokens without an ``email`` claim.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         profiles: typing.Iterable[TrustProfile],
         *,
         accepted_client_ids: typing.Iterable[str],
         machine_clients: Mapping[str, typing.Iterable[str]] | None = None,
         machine_organizations: Mapping[str, typing.Iterable[str]] | None = None,
+        machine_organization: str | None = None,
         require_email: bool = False,
     ) -> None:
         self._profiles: dict[str, TrustProfile] = {}
@@ -90,6 +103,7 @@ class TokenVerifier:
             client_id: frozenset(organizations)
             for client_id, organizations in (machine_organizations or {}).items()
         }
+        self._machine_organization = machine_organization
         self._require_email = require_email
 
     async def verify(self, token: str) -> Principal:
@@ -131,10 +145,12 @@ class TokenVerifier:
         return self._user_principal(subject, claims)
 
     def _machine_principal(self, subject: str, claims: dict[str, typing.Any]) -> Principal:
+        organization_id = _str_claim(claims, "org_id")
         permissions = self._machine_clients.get(subject)
         if permissions is None:
-            raise AuthenticationError("Machine client is not allowed")
-        organization_id = _str_claim(claims, "org_id")
+            if self._machine_organization is None or organization_id != self._machine_organization:
+                raise AuthenticationError("Machine client is not allowed")
+            permissions = _scope_claim(claims)
         if organization_id is None:
             raise AuthenticationError("Machine token has no organisation")
         organizations = self._machine_organizations.get(subject)
