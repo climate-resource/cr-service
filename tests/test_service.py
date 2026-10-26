@@ -57,8 +57,9 @@ async def test_probes_answer_while_request_threads_are_busy():
             transport=httpx.ASGITransport(app=app), base_url="http://test"
         ) as client:
             slow_request = asyncio.create_task(client.get("/slow"))
-            while limiter.borrowed_tokens < 1:
-                await asyncio.sleep(0.01)
+            with anyio.fail_after(1):
+                while limiter.borrowed_tokens < 1:
+                    await asyncio.sleep(0.01)
             with anyio.fail_after(1):
                 assert (await client.get("/livez")).json() == {"status": "alive"}
                 assert (await client.get("/readyz")).json() == {"status": "ready"}
