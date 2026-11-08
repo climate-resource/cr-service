@@ -18,7 +18,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from cr_service.auth.authenticator import Authenticator, build_authenticator
-from cr_service.auth.dependencies import AuthConfig, install_auth
+from cr_service.auth.dependencies import AuthConfig, install_auth, installed_config
 from cr_service.auth.keys import StaticKeySource
 from cr_service.settings import ServiceSettings
 from cr_service.workos import STAGING, WorkOSEnvironment
@@ -52,8 +52,7 @@ class TokenFactory:
 
     def install(self, app: fastapi.FastAPI, settings: ServiceSettings) -> None:
         """Make an app built by :func:`cr_service.setup` trust this factory's key, keeping its hooks."""
-        installed = getattr(app.state, "cr_service_auth", None)
-        config = installed.config if installed else AuthConfig()
+        config = installed_config(app) or AuthConfig()
         install_auth(app, settings, dataclasses.replace(config, authenticator=self.authenticator(settings)))
 
     def sign(self, claims: dict[str, typing.Any], *, kid: str | None = None) -> str:
