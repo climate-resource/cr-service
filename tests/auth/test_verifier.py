@@ -196,6 +196,70 @@ async def test_machine_tokens_off_by_default(settings, tokens):
         await tokens.authenticator(settings).authenticate(tokens.machine_token())
 
 
+@pytest.fixture
+def accepting_settings():
+    return make_settings(
+        workos_accept_machine_clients=True, workos_machine_clients={"client_publisher": ["things:write"]}
+    )
+
+
+async def test_machine_client_permissions_from_scope(accepting_settings, tokens):
+    principal = await tokens.authenticator(accepting_settings).authenticate(
+        tokens.machine_token(
+            client_id="client_new", organization_id=STAGING.organization_id, scope="things:read things:write"
+        )
+    )
+    assert principal.kind == "machine"
+    assert principal.id == "client_new"
+    assert principal.permissions == {"things:read", "things:write"}
+
+
+async def test_machine_client_without_scope_has_no_permissions(accepting_settings, tokens):
+    principal = await tokens.authenticator(accepting_settings).authenticate(
+        tokens.machine_token(client_id="client_new", organization_id=STAGING.organization_id)
+    )
+    assert principal.permissions == frozenset()
+
+
+async def test_listed_machine_client_ignores_scope(accepting_settings, tokens):
+    principal = await tokens.authenticator(accepting_settings).authenticate(
+        tokens.machine_token(client_id="client_publisher", scope="things:delete")
+    )
+    assert principal.permissions == {"things:write"}
+
+
+@pytest.mark.parametrize("organization_id", ["org_customer", None])
+async def test_unlisted_machine_client_from_another_organisation(accepting_settings, tokens, organization_id):
+    with pytest.raises(AuthenticationError, match="not allowed"):
+        await tokens.authenticator(accepting_settings).authenticate(
+            tokens.machine_token(
+                client_id="client_new", organization_id=organization_id, scope="things:write"
+            )
+        )
+
+
+async def test_machine_scope_ignored_unless_accepted(machine_settings, tokens):
+    with pytest.raises(AuthenticationError, match="not allowed"):
+        await tokens.authenticator(machine_settings).authenticate(
+            tokens.machine_token(client_id="client_new", organization_id=STAGING.organization_id, scope="x")
+        )
+
+
+async def test_malformed_machine_scope(accepting_settings, tokens):
+    with pytest.raises(AuthenticationError, match="malformed scope"):
+        await tokens.authenticator(accepting_settings).authenticate(
+            tokens.machine_token(client_id="client_new", organization_id=STAGING.organization_id, scope=["x"])
+        )
+
+
+async def test_accept_machine_clients_alone_trusts_machine_issuer(tokens):
+    settings = make_settings(workos_accept_machine_clients=True)
+    principal = await tokens.authenticator(settings).authenticate(
+        tokens.machine_token(client_id="client_new", organization_id=STAGING.organization_id, scope="a:b")
+    )
+    assert principal.permissions == {"a:b"}
+
+
 async def test_organization_gate(tokens):
     settings = make_settings(workos_allowed_organization_ids=("org_allowed",))
     authenticator = tokens.authenticator(settings)
