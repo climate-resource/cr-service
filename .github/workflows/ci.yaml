@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+      - uses: climate-resource/github-actions/setup-uv@6c74f819303d8cd1c65643a90de8dcdc248a03b5 # v1.10.0
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync --frozen --all-extras
@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+      - uses: climate-resource/github-actions/setup-uv@6c74f819303d8cd1c65643a90de8dcdc248a03b5 # v1.10.0
         with:
           python-version: "3.13"
       - run: uv sync --frozen --all-extras
@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+      - uses: climate-resource/github-actions/setup-uv@6c74f819303d8cd1c65643a90de8dcdc248a03b5 # v1.10.0
         with:
           python-version: "3.13"
       - run: uv sync --frozen --all-extras
@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+      - uses: climate-resource/github-actions/setup-uv@6c74f819303d8cd1c65643a90de8dcdc248a03b5 # v1.10.0
         with:
           python-version: "3.13"
       - run: uv build
@@ -65,7 +65,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: climate-resource/github-actions/setup-uv@4760a617b4820ca47e69034e8f926b754d6d4192 # v1.8.1
+      - uses: climate-resource/github-actions/setup-uv@6c74f819303d8cd1c65643a90de8dcdc248a03b5 # v1.10.0
         with:
           python-version: "3.13"
       - run: uv sync --frozen
