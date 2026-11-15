@@ -95,6 +95,12 @@ class ServiceSettings(pydantic_settings.BaseSettings):
     A listed client's tokens must name one of them.
     """
 
+    workos_accept_machine_clients: bool = False
+    """Accept every Climate Resource machine client, with the permissions WorkOS put in its token.
+
+    A client listed in ``WORKOS_MACHINE_CLIENTS`` keeps the permissions listed there.
+    """
+
     workos_require_email: bool = False
     """Refuse user tokens without an ``email`` claim."""
 

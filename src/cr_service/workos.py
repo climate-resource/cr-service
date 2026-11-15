@@ -28,6 +28,8 @@ class WorkOSEnvironment:
         Hostname of the AuthKit sign-in UI, which also issues machine-to-machine tokens.
     bookshelf_client_id
         Client id of the application the ``bookshelf`` CLI signs people in with.
+    organization_id
+        The Climate Resource organisation, which owns the internal machine clients.
     api_hostname
         Hostname serving the user-management API, the user-token issuer and its JWKS.
     """
@@ -36,6 +38,7 @@ class WorkOSEnvironment:
     root_client_id: str
     authkit_domain: str
     bookshelf_client_id: str
+    organization_id: str
     api_hostname: str = API_HOSTNAME
 
     @property
@@ -74,6 +77,7 @@ PRODUCTION = WorkOSEnvironment(
     root_client_id="client_01KABZE0SFNZXEYZ337HSVBZ36",
     authkit_domain="auth.climateresource.com.au",
     bookshelf_client_id="client_01KY695M48CT84XBQ53EDTG8PE",
+    organization_id="org_01KSS0RYM3TY4HEBFAYBVKJ17M",
 )
 
 STAGING = WorkOSEnvironment(
@@ -81,6 +85,7 @@ STAGING = WorkOSEnvironment(
     root_client_id="client_01KABZE0E62YS9H7BMV6YZGMD1",
     authkit_domain="balanced-universe-28-staging.authkit.app",
     bookshelf_client_id="client_01M2EV5XYS01J8283Q89M9BHQM",
+    organization_id="org_01KGPDRWAGY8G7TXVN5XM36Q0X",
 )
 
 WORKOS_ENVIRONMENTS: dict[WorkOSEnvironmentName, WorkOSEnvironment] = {
