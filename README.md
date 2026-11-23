@@ -17,6 +17,8 @@ What it provides:
 - A token factory that signs real tokens, so tests go through the production verifier.
 
 The infrastructure [observability docs][observability] cover where the logs, metrics, traces and profiles go.
+[`docs/playbook/`](docs/playbook/index.md) holds the pages the playbook publishes,
+such as the [WorkOS service contract](docs/playbook/workos-service-onboarding.md).
 
 ## Quick start
 
