@@ -15,14 +15,11 @@ from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from cr_service import context, redact
+from cr_service.auth.outcome import auth_status_header
 from cr_service.health import PROBE_PATHS
 from cr_service.tracing import current_trace_context, set_span_attributes
 
 logger = logging.getLogger("access")
-
-
-# Shadow failures report as fail, so clients see the outcome enforcement would have.
-_AUTH_STATUS_HEADER = {"pass": b"pass", "skipped": b"skipped", "fail": b"fail", "shadow_fail": b"fail"}
 
 
 def _resolve_request_id(request: fastapi.Request) -> str:
@@ -85,7 +82,7 @@ class WideEventMiddleware:
                 headers = list(message.get("headers", []))
                 headers.append((b"x-request-id", request_id.encode()))
                 headers.append((b"x-process-time", f"{time.perf_counter() - start:.6f}".encode()))
-                auth_status = _AUTH_STATUS_HEADER.get(context.get_context().get("auth_outcome", ""))
+                auth_status = auth_status_header(context.get_context().get("auth_outcome"))
                 if auth_status and not any(name.lower() == b"x-auth-status" for name, _ in headers):
                     headers.append((b"x-auth-status", auth_status))
                 message["headers"] = headers
