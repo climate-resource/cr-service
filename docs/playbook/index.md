@@ -14,6 +14,8 @@ alongside the conventions and decisions that stay there.
 The [README](https://github.com/climate-resource/cr-service#readme) remains the reference
 for every setting and API.
 
+## Pages
+
 | Page                                                    | Description                                                                                                                                         |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [WorkOS service contract](workos-service-onboarding.md) | How a client-facing Python service verifies WorkOS tokens through cr-service, the settings it reads, the local-only auth guards, and shadow rollout. |
