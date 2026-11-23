@@ -13,7 +13,7 @@ Every Python service verifies tokens through cr-service rather than writing its 
 The [README](https://github.com/climate-resource/cr-service#configuration) lists every variable,
 so this page does not repeat them.
 
-- [WorkOS core configuration](https://playbook.climate-resource.workers.dev/infrastructure/production/workos-core-config/)
+- [WorkOS core configuration](https://playbook.climate-resource.workers.dev/infrastructure/operating/workos-core-config/)
   owns the tenant: environments, domains, the JWT template, roles, and where each setting lives.
 - [Authorisation and entitlements](https://playbook.climate-resource.workers.dev/engineering/preferences/authorisation/)
   owns the policy these settings enforce.
@@ -54,7 +54,7 @@ The values a service sets itself:
 - `WORKOS_API_KEY`, the only secret, needed only for `WorkOSClient` and `WORKOS_ACCEPT_API_KEYS`.
 
 A missing flag or a disallowed organisation answers 403.
-[Where each value lives](https://playbook.climate-resource.workers.dev/infrastructure/production/workos-core-config/#where-each-value-lives)
+[Where each value lives](https://playbook.climate-resource.workers.dev/infrastructure/operating/workos-core-config/#where-each-value-lives)
 is owned by core configuration.
 
 ## Local-only auth guards
@@ -83,7 +83,7 @@ A service rolls auth out in shadow mode, watches the failures, then sets `AUTH_E
 
 Work through staging first, then production.
 The dashboard side (application, flags, redirect URIs) is
-[WorkOS app onboarding](https://playbook.climate-resource.workers.dev/infrastructure/production/workos-app-onboarding/).
+[WorkOS app onboarding](https://playbook.climate-resource.workers.dev/infrastructure/operating/workos-app-onboarding/).
 
 - [ ] Use cr-service 0.5.2 or later.
       Earlier releases let authorisation failures through in shadow mode,
@@ -91,7 +91,7 @@ The dashboard side (application, flags, redirect URIs) is
 - [ ] Read settings through a subclass of `cr_service.ServiceSettings`.
 - [ ] Set `ENVIRONMENT` correctly for the deployment, and leave `WORKOS_ENVIRONMENT` unset.
 - [ ] Set `WORKOS_CLIENT_ID` for that WorkOS environment, and check it with the `curl` command in
-      [core configuration](https://playbook.climate-resource.workers.dev/infrastructure/production/workos-core-config/#where-each-value-lives).
+      [core configuration](https://playbook.climate-resource.workers.dev/infrastructure/operating/workos-core-config/#where-each-value-lives).
 - [ ] Set `WORKOS_REQUIRED_FEATURE_FLAG` to the product's entitlement flag.
 - [ ] Leave `AUTH_PROVIDER` at its default, `workos`.
 - [ ] Roll out with `AUTH_ENFORCE=false`, watch `x-auth-status` and the `shadow_fail` logs, then enforce.
